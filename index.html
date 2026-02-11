@@ -1,35 +1,44 @@
-fic
-
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Scientific Literature to JSON Extraction</title>
+  <title>Scientific Literature → JSON Extraction</title>
   <style>
     body { font-family: system-ui; max-width: 980px; margin: 40px auto; padding: 0 16px; }
-    textarea, input { width: 100%; }
+    textarea, input, select { width: 100%; }
     textarea { min-height: 110px; }
     pre { background: #f6f8fa; padding: 12px; border-radius: 10px; overflow:auto; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items: center; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items: end; }
     button { padding: 10px 14px; cursor:pointer; }
     input[type="file"] { padding: 8px; }
     .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; margin-top: 12px; }
     small { color: #555; }
     .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eef2ff; font-size:12px; }
+    label small { display:block; margin-bottom:6px; }
   </style>
 </head>
 <body>
   <h1>Scientific Literature → JSON Extractor</h1>
-  <p><small class="pill">Wajahat Hussain</small> 
+  <p>
+    <small class="pill">Frontend: GitHub Pages</small>
+    <small class="pill">Backend: Vercel API</small>
+  </p>
 
   <div class="card">
     <h3>1) Choose a PDF</h3>
     <div class="row">
-      <input id="pdf" type="file" accept="application/pdf" />
-      <button id="loadBtn">Load PDF Text</button>
+      <div style="flex:2; min-width:280px;">
+        <small>PDF file</small>
+        <input id="pdf" type="file" accept="application/pdf" />
+      </div>
+      <div style="flex:1; min-width:220px;">
+        <button id="loadBtn" style="width:100%;">Load PDF Text</button>
+      </div>
     </div>
+
     <p><small id="status">No PDF loaded.</small></p>
+
     <details>
       <summary><small>Preview extracted text (first ~2000 chars)</small></summary>
       <pre id="preview"></pre>
@@ -62,19 +71,35 @@ fic
 }
     </textarea>
 
-    <div class="row" style="margin-top:12px;">
-      <button id="runBtn">Run Extraction (OpenAI)</button>
-      <button id="downloadBtn">Download JSON</button>
+    <h3 style="margin-top:14px;">4) Model</h3>
+    <div class="row">
+      <label style="flex:1; min-width:220px;">
+        <small>Provider</small>
+        <select id="provider" style="padding:10px;">
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Claude (Anthropic)</option>
+          <option value="gemini">Gemini (Google)</option>
+          <option value="deepseek">DeepSeek</option>
+        </select>
+      </label>
+
+      <label style="flex:2; min-width:280px;">
+        <small>Model (optional)</small>
+        <input id="model" placeholder="Leave blank to use default for provider" style="padding:10px;" />
+      </label>
     </div>
 
-    <p><small>Tip: If you get a CORS error, your backend must allow your GitHub Pages domain.</small></p>
+    <div class="row" style="margin-top:12px;">
+      <button id="runBtn" style="flex:1; min-width:220px;">Run Extraction</button>
+      <button id="downloadBtn" style="flex:1; min-width:220px;">Download JSON</button>
+    </div>
   </div>
+
   <div class="card">
     <h3>Result (JSON)</h3>
     <pre id="out">{}</pre>
   </div>
 
-  <!-- PDF.js (module build) -->
   <script type="module">
     const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
 
@@ -132,19 +157,23 @@ fic
           return alert("Schema is not valid JSON.");
         }
 
+        const provider = document.getElementById("provider").value;
+        const modelInput = document.getElementById("model").value.trim();
+
         outEl.textContent = "Calling backend...";
 
-        // We embed the PDF text into the prompt for now (no RAG/ingest yet).
         const prompt = `DOCUMENT TEXT:\n${pdfText}\n\nTASK:\n${query}`;
+
         const r = await fetch(`${API_BASE}/extract_json`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            provider,
+            model: modelInput || undefined,
             prompt,
             schema
           })
         });
-
 
         const data = await r.json();
 
@@ -153,7 +182,8 @@ fic
           return;
         }
 
-        outEl.textContent = JSON.stringify(data.result ?? data, null, 2);
+        // backend returns { ok, provider, model, result }
+        outEl.textContent = JSON.stringify(data, null, 2);
       } catch (e) {
         console.error(e);
         outEl.textContent = JSON.stringify({ error: String(e?.message || e) }, null, 2);
