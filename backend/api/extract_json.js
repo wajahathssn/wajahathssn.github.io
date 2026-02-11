@@ -2,6 +2,13 @@ import Ajv from "ajv";
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
+function setCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "https://wajahathssn.github.io");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
+}
+
+
 function safeJsonParse(text) {
   const t = (text || "").trim();
 
