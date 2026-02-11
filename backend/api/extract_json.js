@@ -156,8 +156,8 @@ export default async function handler(req, res) {
 
     const defaultModel =
       p === "openai" ? "gpt-4o-mini" :
-      p === "anthropic" ? "claude-3-5-sonnet-latest" :
-      p === "gemini" ? "gemini-1.5-pro" :
+      p === "anthropic" ? "claude-sonnet-4-6" :
+      p === "gemini" ? "gemini-3-pro-preview" :
       p === "deepseek" ? "deepseek-chat" :
       "gpt-4o-mini";
 
