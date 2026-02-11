@@ -67,7 +67,6 @@
 
     <p><small>Tip: If you get a CORS error, your backend must allow your GitHub Pages domain.</small></p>
   </div>
-
   <div class="card">
     <h3>Result (JSON)</h3>
     <pre id="out">{}</pre>
@@ -135,17 +134,15 @@
 
         // We embed the PDF text into the prompt for now (no RAG/ingest yet).
         const prompt = `DOCUMENT TEXT:\n${pdfText}\n\nTASK:\n${query}`;
-
         const r = await fetch(`${API_BASE}/extract_json`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            provider: "openai",
-            model: "gpt-4o-mini",
             prompt,
             schema
           })
         });
+
 
         const data = await r.json();
 
