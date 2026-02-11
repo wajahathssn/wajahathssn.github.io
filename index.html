@@ -2,72 +2,171 @@
 <html>
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PDF → JSON Extractor</title>
   <style>
-    body { font-family: system-ui; max-width: 900px; margin: 40px auto; padding: 0 16px; }
-    textarea { width: 100%; min-height: 100px; }
-    pre { background: #f6f8fa; padding: 12px; border-radius: 8px; overflow:auto; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    body { font-family: system-ui; max-width: 980px; margin: 40px auto; padding: 0 16px; }
+    textarea, input { width: 100%; }
+    textarea { min-height: 110px; }
+    pre { background: #f6f8fa; padding: 12px; border-radius: 10px; overflow:auto; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items: center; }
     button { padding: 10px 14px; cursor:pointer; }
     input[type="file"] { padding: 8px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; margin-top: 12px; }
+    small { color: #555; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eef2ff; font-size:12px; }
   </style>
 </head>
 <body>
   <h1>PDF → JSON Extractor</h1>
+  <p><small class="pill">Frontend: GitHub Pages</small> <small class="pill">Backend: Vercel API</small></p>
 
-  <div class="row">
-    <input id="pdf" type="file" accept="application/pdf" />
-    <button id="uploadBtn">1) Upload & Index</button>
+  <div class="card">
+    <h3>1) Choose a PDF</h3>
+    <div class="row">
+      <input id="pdf" type="file" accept="application/pdf" />
+      <button id="loadBtn">Load PDF Text</button>
+    </div>
+    <p><small id="status">No PDF loaded.</small></p>
+    <details>
+      <summary><small>Preview extracted text (first ~2000 chars)</small></summary>
+      <pre id="preview"></pre>
+    </details>
   </div>
 
-  <h3>Query / Extraction instruction</h3>
-  <textarea id="query">Extract materials and the properties they have which are mentioned in the abstract.</textarea>
-  <button id="askBtn">2) Run Extraction</button>
+  <div class="card">
+    <h3>2) Extraction instruction</h3>
+    <textarea id="query">Extract mentions of materials and the properties they have which are mentioned in the abstract.</textarea>
 
-  <h3>Result (JSON)</h3>
-  <pre id="out">{}</pre>
-  <button id="downloadBtn">Download JSON</button>
+    <h3 style="margin-top:14px;">3) JSON Schema</h3>
+    <textarea id="schema">
+{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "material": { "type": "string" },
+          "properties": { "type": "array", "items": { "type": "string" } },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["material", "properties"]
+      }
+    }
+  },
+  "required": ["items"]
+}
+    </textarea>
 
-  <script>
-    // TODO: set your API base URL (Cloudflare Worker / Vercel function)
-    const API_BASE = "https://YOUR-WORKER.your-subdomain.workers.dev";
+    <div class="row" style="margin-top:12px;">
+      <button id="runBtn">Run Extraction (OpenAI)</button>
+      <button id="downloadBtn">Download JSON</button>
+    </div>
 
-    let docId = null;
+    <p><small>Tip: If you get a CORS error, your backend must allow your GitHub Pages domain.</small></p>
+  </div>
 
-    document.getElementById("uploadBtn").onclick = async () => {
-      const f = document.getElementById("pdf").files[0];
-      if (!f) return alert("Choose a PDF first.");
+  <div class="card">
+    <h3>Result (JSON)</h3>
+    <pre id="out">{}</pre>
+  </div>
 
-      const fd = new FormData();
-      fd.append("file", f);
+  <!-- PDF.js (module build) -->
+  <script type="module">
+    const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
 
-      const r = await fetch(`${API_BASE}/ingest`, { method: "POST", body: fd });
-      if (!r.ok) return alert("Upload failed");
-      const data = await r.json();
-      docId = data.doc_id;
-      alert(`Indexed! doc_id=${docId}`);
+    let pdfText = "";
+    const statusEl = document.getElementById("status");
+    const previewEl = document.getElementById("preview");
+    const outEl = document.getElementById("out");
+
+    async function pdfToText(file) {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfjsLib = await import("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs");
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs";
+
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+      let text = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map(it => it.str).join(" ");
+        text += `\n\n[Page ${i}]\n${pageText}`;
+      }
+      return text.trim();
+    }
+
+    document.getElementById("loadBtn").onclick = async () => {
+      try {
+        const f = document.getElementById("pdf").files[0];
+        if (!f) return alert("Choose a PDF first.");
+
+        statusEl.textContent = "Extracting text from PDF in the browser...";
+        pdfText = await pdfToText(f);
+
+        previewEl.textContent = pdfText.slice(0, 2000) + (pdfText.length > 2000 ? "\n\n...[truncated]" : "");
+        statusEl.textContent = `Loaded PDF text (${pdfText.length.toLocaleString()} characters). Ready to run extraction.`;
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Failed to extract PDF text.";
+        alert("Failed to extract PDF text. Try a different PDF or smaller file.");
+      }
     };
 
-    document.getElementById("askBtn").onclick = async () => {
-      if (!docId) return alert("Upload & index first.");
-      const query = document.getElementById("query").value;
+    document.getElementById("runBtn").onclick = async () => {
+      try {
+        if (!pdfText) return alert("Load PDF text first (click 'Load PDF Text').");
 
-      const r = await fetch(`${API_BASE}/extract`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ doc_id: docId, query })
-      });
+        const query = document.getElementById("query").value.trim();
+        if (!query) return alert("Enter an extraction instruction.");
 
-      const data = await r.json();
-      document.getElementById("out").textContent = JSON.stringify(data, null, 2);
+        let schema;
+        try {
+          schema = JSON.parse(document.getElementById("schema").value);
+        } catch {
+          return alert("Schema is not valid JSON.");
+        }
+
+        outEl.textContent = "Calling backend...";
+
+        // We embed the PDF text into the prompt for now (no RAG/ingest yet).
+        const prompt = `DOCUMENT TEXT:\n${pdfText}\n\nTASK:\n${query}`;
+
+        const r = await fetch(`${API_BASE}/extract_json`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: "openai",
+            model: "gpt-4o-mini",
+            prompt,
+            schema
+          })
+        });
+
+        const data = await r.json();
+
+        if (!r.ok) {
+          outEl.textContent = JSON.stringify(data, null, 2);
+          return;
+        }
+
+        outEl.textContent = JSON.stringify(data.result ?? data, null, 2);
+      } catch (e) {
+        console.error(e);
+        outEl.textContent = JSON.stringify({ error: String(e?.message || e) }, null, 2);
+      }
     };
 
     document.getElementById("downloadBtn").onclick = () => {
-      const text = document.getElementById("out").textContent || "{}";
+      const text = outEl.textContent || "{}";
       const blob = new Blob([text], { type: "application/json" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `extraction-${docId || "result"}.json`;
+      a.download = "extraction-result.json";
       a.click();
       URL.revokeObjectURL(a.href);
     };
