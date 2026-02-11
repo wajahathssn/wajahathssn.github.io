@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PDF → JSON Extractor</title>
+  <title>PDF → JSON Extractor (Abstract Only)</title>
   <style>
     body { font-family: system-ui; max-width: 980px; margin: 40px auto; padding: 0 16px; }
     textarea, input { width: 100%; }
@@ -15,10 +15,11 @@
     .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; margin-top: 12px; }
     small { color: #555; }
     .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eef2ff; font-size:12px; }
+    .warn { background:#fff7ed; border:1px solid #fed7aa; padding:10px; border-radius:10px; }
   </style>
 </head>
 <body>
-  <h1>PDF → JSON Extractor</h1>
+  <h1>PDF → JSON Extractor (Abstract Only)</h1>
   <p><small class="pill">Frontend: GitHub Pages</small> <small class="pill">Backend: Vercel API</small></p>
 
   <div class="card">
@@ -29,9 +30,12 @@
     </div>
     <p><small id="status">No PDF loaded.</small></p>
     <details>
-      <summary><small>Preview extracted text (first ~2000 chars)</small></summary>
+      <summary><small>Preview (Abstract if detected, else first ~2000 chars)</small></summary>
       <pre id="preview"></pre>
     </details>
+    <div id="abstractNote" class="warn" style="display:none;">
+      <small><b>Note:</b> Abstract heading wasn’t detected reliably, so the app will fall back to using the full text. If you want, share a snippet of the extracted text around the abstract heading and we can tune the detector.</small>
+    </div>
   </div>
 
   <div class="card">
@@ -64,22 +68,22 @@
       <button id="runBtn">Run Extraction (OpenAI)</button>
       <button id="downloadBtn">Download JSON</button>
     </div>
-
-    <p><small>Tip: If you get a CORS error, your backend must allow your GitHub Pages domain.</small></p>
   </div>
+
   <div class="card">
     <h3>Result (JSON)</h3>
     <pre id="out">{}</pre>
   </div>
 
-  <!-- PDF.js (module build) -->
   <script type="module">
     const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
 
     let pdfText = "";
+    let abstractText = "";
     const statusEl = document.getElementById("status");
     const previewEl = document.getElementById("preview");
     const outEl = document.getElementById("out");
+    const abstractNoteEl = document.getElementById("abstractNote");
 
     async function pdfToText(file) {
       const arrayBuffer = await file.arrayBuffer();
@@ -99,16 +103,59 @@
       return text.trim();
     }
 
+    // Attempts to extract the abstract section.
+    // Falls back to null if not confidently detected.
+    function extractAbstractFromText(fullText) {
+      const t = (fullText || "").replace(/\r/g, "");
+
+      // Try common "Abstract" heading patterns
+      const startMatch =
+        t.match(/\n\s*(Abstract|ABSTRACT)\s*[:\n]\s*/);
+
+      if (!startMatch) return null;
+
+      const startIdx = startMatch.index + startMatch[0].length;
+      const rest = t.slice(startIdx);
+
+      // Try common next headings
+      const endMatch = rest.match(
+        /\n\s*(Keywords?|KEYWORDS?|Introduction|INTRODUCTION|1\.?\s*Introduction|Results|RESULTS|Methods|METHODS|Background|BACKGROUND)\s*[:\n]\s*/
+      );
+
+      const endIdx = endMatch ? startIdx + endMatch.index : Math.min(t.length, startIdx + 7000);
+
+      const abstract = t.slice(startIdx, endIdx).trim();
+
+      // Guard against bad detection
+      if (abstract.length < 150) return null;
+
+      return abstract;
+    }
+
     document.getElementById("loadBtn").onclick = async () => {
       try {
+        abstractNoteEl.style.display = "none";
+        outEl.textContent = "{}";
+        previewEl.textContent = "";
+
         const f = document.getElementById("pdf").files[0];
         if (!f) return alert("Choose a PDF first.");
 
         statusEl.textContent = "Extracting text from PDF in the browser...";
         pdfText = await pdfToText(f);
 
-        previewEl.textContent = pdfText.slice(0, 2000) + (pdfText.length > 2000 ? "\n\n...[truncated]" : "");
-        statusEl.textContent = `Loaded PDF text (${pdfText.length.toLocaleString()} characters). Ready to run extraction.`;
+        abstractText = extractAbstractFromText(pdfText) || "";
+
+        const toPreview = abstractText || pdfText;
+        previewEl.textContent =
+          toPreview.slice(0, 2000) + (toPreview.length > 2000 ? "\n\n...[truncated]" : "");
+
+        if (abstractText) {
+          statusEl.textContent = `Abstract detected (${abstractText.length.toLocaleString()} chars). Ready to run extraction.`;
+        } else {
+          statusEl.textContent = `Abstract not detected reliably. Loaded full text (${pdfText.length.toLocaleString()} chars).`;
+          abstractNoteEl.style.display = "block";
+        }
       } catch (e) {
         console.error(e);
         statusEl.textContent = "Failed to extract PDF text.";
@@ -132,17 +179,15 @@
 
         outEl.textContent = "Calling backend...";
 
-        // We embed the PDF text into the prompt for now (no RAG/ingest yet).
-        const prompt = `DOCUMENT TEXT:\n${pdfText}\n\nTASK:\n${query}`;
+        // Abstract-only if detected; otherwise fallback to full text.
+        const textToUse = abstractText || pdfText;
+        const prompt = `DOCUMENT TEXT (ABSTRACT ONLY):\n${textToUse}\n\nTASK:\n${query}`;
+
         const r = await fetch(`${API_BASE}/extract_json`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt,
-            schema
-          })
+          body: JSON.stringify({ prompt, schema })
         });
-
 
         const data = await r.json();
 
