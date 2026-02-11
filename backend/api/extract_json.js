@@ -3,11 +3,13 @@ import Ajv from "ajv";
 const ajv = new Ajv({ allErrors: true, strict: false });
 
 function setCors(res) {
+  // Tight allowlist (recommended). For quick testing you can use "*"
   res.setHeader("Access-Control-Allow-Origin", "https://wajahathssn.github.io");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
+  // Helps avoid weird caching across origins
+  res.setHeader("Vary", "Origin");
 }
-
 
 function safeJsonParse(text) {
   const t = (text || "").trim();
@@ -26,6 +28,14 @@ function safeJsonParse(text) {
 }
 
 export default async function handler(req, res) {
+  // ✅ CORS must be set before any return
+  setCors(res);
+
+  // ✅ Handle preflight
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Use POST" });
@@ -39,18 +49,25 @@ export default async function handler(req, res) {
     }
 
     const { prompt, schema, provider, model } = req.body || {};
-    if (!prompt || typeof prompt !== "string") return res.status(400).json({ error: "Missing prompt string" });
-    if (!schema || typeof schema !== "object") return res.status(400).json({ error: "Missing schema object" });
+    if (!prompt || typeof prompt !== "string") {
+      return res.status(400).json({ error: "Missing prompt string" });
+    }
+    if (!schema || typeof schema !== "object") {
+      return res.status(400).json({ error: "Missing schema object" });
+    }
 
     // OpenAI-only for now
     const llmProvider = provider || "openai";
     if (llmProvider !== "openai") {
       return res.status(400).json({ error: `Provider not supported yet: ${llmProvider}` });
     }
+
     const llmModel = model || "gpt-4o-mini";
 
     const openaiKey = process.env.OPENAI_API_KEY;
-    if (!openaiKey) return res.status(500).json({ error: "Missing OPENAI_API_KEY on server" });
+    if (!openaiKey) {
+      return res.status(500).json({ error: "Missing OPENAI_API_KEY on server" });
+    }
 
     const validate = ajv.compile(schema);
 
@@ -69,7 +86,7 @@ export default async function handler(req, res) {
       const r = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${openaiKey}`,
+          Authorization: `Bearer ${openaiKey}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -82,11 +99,16 @@ export default async function handler(req, res) {
         })
       });
 
+      const text = await r.text();
+
       if (!r.ok) {
-        return res.status(502).json({ error: `OpenAI error: ${r.status}`, details: await r.text() });
+        return res.status(502).json({
+          error: `OpenAI error: ${r.status}`,
+          details: text
+        });
       }
 
-      const data = await r.json();
+      const data = JSON.parse(text);
       const raw = data.choices?.[0]?.message?.content ?? "";
       lastRaw = raw;
 
@@ -94,7 +116,12 @@ export default async function handler(req, res) {
       if (!parsed.ok) continue;
 
       if (validate(parsed.value)) {
-        return res.status(200).json({ ok: true, provider: "openai", model: llmModel, result: parsed.value });
+        return res.status(200).json({
+          ok: true,
+          provider: "openai",
+          model: llmModel,
+          result: parsed.value
+        });
       }
     }
 
@@ -103,7 +130,6 @@ export default async function handler(req, res) {
       error: "Model output did not validate against schema",
       raw: lastRaw
     });
-
   } catch (err) {
     return res.status(500).json({ error: String(err?.message || err) });
   }
