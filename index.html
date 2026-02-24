@@ -19,6 +19,7 @@
     .muted { color: #666; }
     .tiny { font-size: 12px; }
     .ok { color: #0a7f3f; }
+    .warn { color: #9a6700; }
     .mode-box {
       background: #f8fafc;
       border: 1px solid #e2e8f0;
@@ -40,6 +41,7 @@
   <p>
     <small class="pill">Frontend: GitHub Pages</small>
     <small class="pill">Backend: Vercel API</small>
+    <small class="pill">Abstract-only</small>
     <small class="pill">One-shot + Two-shot</small>
   </p>
 
@@ -61,6 +63,11 @@
       <summary><small>Preview extracted text (first ~2000 chars)</small></summary>
       <pre id="preview"></pre>
     </details>
+
+    <details style="margin-top:8px;">
+      <summary><small>Preview detected abstract</small></summary>
+      <pre id="abstractPreview"></pre>
+    </details>
   </div>
 
   <div class="card">
@@ -70,24 +77,12 @@
       <label style="flex:1; min-width:240px;">
         <small>Mode</small>
         <select id="mode" style="padding:10px;">
-          <option value="one_shot" selected>One-shot</option>
+          <option value="one_shot" selected>One-shot (baseline)</option>
           <option value="two_shot">Two-shot (extract → verify)</option>
         </select>
       </label>
 
       <label style="flex:1; min-width:240px;">
-        <small>Retrieval mode</small>
-        <select id="retrievalMode" style="padding:10px;">
-          <option value="full_text" selected>Full text</option>
-          <option value="abstract_only">Abstract only</option>
-        </select>
-      </label>
-    </div>
-
-    <div id="modeInfo" class="mode-box"></div>
-
-    <div class="row" style="margin-top:10px;">
-      <label style="flex:1; min-width:220px;">
         <small>Provider</small>
         <select id="provider" style="padding:10px;">
           <option value="openai" selected>OpenAI</option>
@@ -103,6 +98,8 @@
       </label>
     </div>
 
+    <div id="modeInfo" class="mode-box"></div>
+
     <h3 style="margin-top:14px;">3) JSON Schema</h3>
     <p class="tiny muted" id="schemaHint"></p>
     <textarea id="schema"></textarea>
@@ -114,7 +111,7 @@
     </div>
 
     <p class="tiny muted" style="margin-top:10px;">
-      One-shot uses a simple extraction prompt. Two-shot uses a qualifier-aware extraction prompt + verification pass.
+      This app always extracts from the <strong>abstract only</strong>. One-shot is kept as your baseline. Two-shot adds verification and contextual fields.
     </p>
   </div>
 
@@ -126,13 +123,19 @@
   <script type="module">
     const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
 
-    // Hidden internal prompts (not shown in UI)
+    // =========================================================
+    // BASELINE ONE-SHOT PROMPT (frozen exactly as before)
+    // =========================================================
     const ONE_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract.";
 
+    // New two-shot prompt (qualifier-aware)
     const TWO_SHOT_INSTRUCTION =
-      "Extract mentions of materials and the properties they have which are mentioned in the paper. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.";
+      "Extract mentions of materials and the properties they have which are mentioned in the abstract. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.";
 
+    // =========================================================
+    // SCHEMAS
+    // =========================================================
     const BASIC_SCHEMA = `{
   "type": "object",
   "properties": {
@@ -188,10 +191,12 @@
 }`;
 
     let pdfText = "";
-    let includeDebug = false; // Auto-controlled by mode
+    let abstractText = "";
+    let includeDebug = false; // mode-controlled
 
     const statusEl = document.getElementById("status");
     const previewEl = document.getElementById("preview");
+    const abstractPreviewEl = document.getElementById("abstractPreview");
     const outEl = document.getElementById("out");
 
     const modeEl = document.getElementById("mode");
@@ -203,27 +208,29 @@
       const mode = modeEl.value;
 
       if (mode === "one_shot") {
+        // Freeze one-shot baseline behavior
         schemaEl.value = BASIC_SCHEMA;
         includeDebug = false;
-        schemaHintEl.innerHTML = `Auto schema: <code class="inline">basic</code>. Debug is <strong>OFF</strong>. Hidden prompt: abstract-focused simple extraction.`;
 
+        schemaHintEl.innerHTML = `Auto schema: <code class="inline">basic</code>. Debug is <strong>OFF</strong>.`;
         modeInfoEl.innerHTML = `
-          <div class="mode-title">One-shot mode</div>
+          <div class="mode-title">One-shot baseline</div>
           <div class="tiny muted">
-            Single model call. Faster and cheaper. Uses your original prompt style
-            (focused on extracting material-property mentions from the abstract) and the <strong>basic schema</strong>.
+            This is your original baseline setup (single call, abstract-only, basic schema).
+            Use this for consistent comparison tests.
           </div>
         `;
       } else {
+        // Two-shot experimental/improved mode
         schemaEl.value = CONTEXTUAL_SCHEMA;
         includeDebug = true;
-        schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code>. Debug is <strong>ON</strong>. Hidden prompt: qualifier-aware extraction for full paper context.`;
 
+        schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code>. Debug is <strong>ON</strong>.`;
         modeInfoEl.innerHTML = `
-          <div class="mode-title">Two-shot mode (recommended)</div>
+          <div class="mode-title">Two-shot mode</div>
           <div class="tiny muted">
-            Pass 1 extracts candidate claims. Pass 2 generates a <strong>paper-specific verification plan</strong> and repairs/verifies the extraction.
-            Uses a qualifier-aware prompt and the <strong>contextual schema</strong> (conditions / values / evidence).
+            Extracts candidate claims, then verifies/repairs them with a second pass.
+            Returns richer JSON with qualifiers/conditions/values when available.
           </div>
         `;
       }
@@ -254,13 +261,20 @@
       const t = fullText || "";
       const lower = t.toLowerCase();
 
+      // Find "Abstract"
       const absIdx = lower.search(/\babstract\b/);
-      if (absIdx < 0) return t;
+      if (absIdx < 0) {
+        // Fallback: first chunk
+        return t.slice(0, 4500).trim();
+      }
 
       const after = t.slice(absIdx);
+
+      // Common abstract end markers
       const endCandidates = [
-        /\bintroduction\b/i,
         /\bkeywords\b/i,
+        /\bkey words\b/i,
+        /\bintroduction\b/i,
         /\b1[\.\s]+introduction\b/i,
         /\bbackground\b/i
       ];
@@ -271,7 +285,7 @@
         if (m > 20 && (end === -1 || m < end)) end = m;
       }
 
-      const abstractBlock = end > 0 ? after.slice(0, end) : after.slice(0, 4000);
+      const abstractBlock = end > 0 ? after.slice(0, end) : after.slice(0, 5000);
       return abstractBlock.trim();
     }
 
@@ -282,12 +296,16 @@
 
         statusEl.textContent = "Extracting text from PDF in the browser...";
         pdfText = await pdfToText(f);
+        abstractText = extractAbstractOnly(pdfText);
 
         previewEl.textContent =
           pdfText.slice(0, 2000) + (pdfText.length > 2000 ? "\n\n...[truncated]" : "");
 
+        abstractPreviewEl.textContent =
+          abstractText || "(No abstract heading detected; fallback text used.)";
+
         statusEl.innerHTML =
-          `<span class="ok">Loaded PDF text</span> (${pdfText.length.toLocaleString()} characters). Ready to run extraction.`;
+          `<span class="ok">Loaded PDF text</span> (${pdfText.length.toLocaleString()} chars). <span class="ok">Abstract extracted</span> (${abstractText.length.toLocaleString()} chars).`;
       } catch (e) {
         console.error(e);
         statusEl.textContent = "Failed to extract PDF text.";
@@ -298,6 +316,7 @@
     document.getElementById("runBtn").onclick = async () => {
       try {
         if (!pdfText) return alert("Load PDF text first (click 'Load PDF Text').");
+        if (!abstractText) return alert("No abstract text available.");
 
         let schema;
         try {
@@ -309,19 +328,14 @@
         const provider = document.getElementById("provider").value;
         const modelInput = document.getElementById("model").value.trim();
         const mode = modeEl.value;
-        const retrievalMode = document.getElementById("retrievalMode").value;
 
-        let sourceText = pdfText;
-        if (retrievalMode === "abstract_only") {
-          sourceText = extractAbstractOnly(pdfText);
-        }
+        // IMPORTANT: one-shot stays baseline, two-shot uses new prompt
+        const instruction = mode === "one_shot" ? ONE_SHOT_INSTRUCTION : TWO_SHOT_INSTRUCTION;
 
-        // Hidden prompt chosen automatically from mode
-        const query = mode === "one_shot" ? ONE_SHOT_INSTRUCTION : TWO_SHOT_INSTRUCTION;
+        // ALWAYS abstract-only
+        const prompt = `DOCUMENT TEXT:\n${abstractText}\n\nTASK:\n${instruction}`;
 
         outEl.textContent = "Calling backend...";
-
-        const prompt = `DOCUMENT TEXT:\n${sourceText}\n\nTASK:\n${query}`;
 
         const r = await fetch(`${API_BASE}/extract_json`, {
           method: "POST",
@@ -329,9 +343,9 @@
           body: JSON.stringify({
             provider,
             model: modelInput || undefined,
-            mode,
-            retrieval_mode: retrievalMode,
-            include_debug: includeDebug,
+            mode,                         // "one_shot" or "two_shot"
+            retrieval_mode: "abstract_only", // fixed
+            include_debug: includeDebug,  // auto by mode
             prompt,
             schema
           })
