@@ -18,9 +18,21 @@
     label small { display:block; margin-bottom:6px; }
     .muted { color: #666; }
     .tiny { font-size: 12px; }
-    .right { margin-left:auto; }
     .ok { color: #0a7f3f; }
-    .warn { color: #b45309; }
+    .mode-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-top: 10px;
+    }
+    .mode-title { font-weight: 600; margin-bottom: 4px; }
+    code.inline {
+      background: #f1f5f9;
+      padding: 1px 6px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
@@ -55,30 +67,24 @@
     <h3>2) Extraction setup</h3>
 
     <div class="row">
-      <label style="flex:1; min-width:220px;">
+      <label style="flex:1; min-width:240px;">
         <small>Mode</small>
         <select id="mode" style="padding:10px;">
-          <option value="one_shot">One-shot</option>
-          <option value="two_shot" selected>Two-shot (extract → verify)</option>
+          <option value="one_shot" selected>One-shot</option>
+          <option value="two_shot">Two-shot (extract → verify)</option>
         </select>
       </label>
 
-      <label style="flex:1; min-width:220px;">
+      <label style="flex:1; min-width:240px;">
         <small>Retrieval mode</small>
         <select id="retrievalMode" style="padding:10px;">
-          <option value="full_text" selected>Full text (current)</option>
-          <option value="abstract_only">Abstract only (label only for now)</option>
-        </select>
-      </label>
-
-      <label style="flex:1; min-width:220px;">
-        <small>Schema preset</small>
-        <select id="schemaPreset" style="padding:10px;">
-          <option value="basic">Basic (material + properties + evidence)</option>
-          <option value="contextual" selected>Contextual (qualifiers/conditions)</option>
+          <option value="full_text" selected>Full text</option>
+          <option value="abstract_only">Abstract only</option>
         </select>
       </label>
     </div>
+
+    <div id="modeInfo" class="mode-box"></div>
 
     <div class="row" style="margin-top:10px;">
       <label style="flex:1; min-width:220px;">
@@ -95,20 +101,13 @@
         <small>Model (optional)</small>
         <input id="model" placeholder="Leave blank to use backend default (OpenAI default = gpt-4o)" style="padding:10px;" />
       </label>
-
-      <label style="flex:1; min-width:220px;">
-        <small>Debug output</small>
-        <select id="includeDebug" style="padding:10px;">
-          <option value="false">Off</option>
-          <option value="true" selected>On (show verification plan)</option>
-        </select>
-      </label>
     </div>
 
     <h3 style="margin-top:14px;">3) Extraction instruction</h3>
     <textarea id="query">Extract mentions of materials and the properties they have which are mentioned in the paper. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.</textarea>
 
     <h3 style="margin-top:14px;">4) JSON Schema</h3>
+    <p class="tiny muted" id="schemaHint"></p>
     <textarea id="schema"></textarea>
 
     <div class="row" style="margin-top:12px;">
@@ -118,7 +117,7 @@
     </div>
 
     <p class="tiny muted" style="margin-top:10px;">
-      Tip: If you get a CORS error, make sure your backend allows <code>https://wajahathssn.github.io</code>.
+      Tip: One-shot is faster. Two-shot is slower but usually more reliable because it verifies/repairs the first extraction.
     </p>
   </div>
 
@@ -128,7 +127,6 @@
   </div>
 
   <script type="module">
-    // Change this only if your Vercel URL changes
     const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
 
     const BASIC_SCHEMA = `{
@@ -186,32 +184,49 @@
 }`;
 
     let pdfText = "";
+    let includeDebug = false; // Auto-controlled by mode
+
     const statusEl = document.getElementById("status");
     const previewEl = document.getElementById("preview");
     const outEl = document.getElementById("out");
 
-    const schemaEl = document.getElementById("schema");
-    const schemaPresetEl = document.getElementById("schemaPreset");
     const modeEl = document.getElementById("mode");
+    const schemaEl = document.getElementById("schema");
+    const schemaHintEl = document.getElementById("schemaHint");
+    const modeInfoEl = document.getElementById("modeInfo");
 
-    function setSchemaFromPreset() {
-      const preset = schemaPresetEl.value;
-      schemaEl.value = preset === "basic" ? BASIC_SCHEMA : CONTEXTUAL_SCHEMA;
+    function applyModeDefaults() {
+      const mode = modeEl.value;
+
+      if (mode === "one_shot") {
+        schemaEl.value = BASIC_SCHEMA;
+        includeDebug = false;
+        schemaHintEl.innerHTML = `Auto schema: <code class="inline">basic</code> (simple materials → properties → evidence). Debug is <strong>OFF</strong>.`;
+
+        modeInfoEl.innerHTML = `
+          <div class="mode-title">One-shot mode</div>
+          <div class="tiny muted">
+            Single model call. Faster and cheaper. Good for quick comparisons across providers.
+            Uses the <strong>basic schema</strong> and returns a simpler JSON structure.
+          </div>
+        `;
+      } else {
+        schemaEl.value = CONTEXTUAL_SCHEMA;
+        includeDebug = true;
+        schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code> (qualifiers / conditions / values). Debug is <strong>ON</strong> (includes verification plan).`;
+
+        modeInfoEl.innerHTML = `
+          <div class="mode-title">Two-shot mode (recommended)</div>
+          <div class="tiny muted">
+            Pass 1 extracts candidate claims. Pass 2 generates a <strong>paper-specific verification plan</strong> and repairs/verifies the extraction.
+            Uses the <strong>contextual schema</strong> and preserves qualifiers/conditions when possible.
+          </div>
+        `;
+      }
     }
 
-    // Initialize default schema
-    setSchemaFromPreset();
-
-    // Optional: auto-switch schema when mode changes
-    modeEl.addEventListener("change", () => {
-      // Two-shot defaults to contextual because it's more useful for verification
-      if (modeEl.value === "two_shot" && schemaPresetEl.value === "basic") {
-        schemaPresetEl.value = "contextual";
-        setSchemaFromPreset();
-      }
-    });
-
-    schemaPresetEl.addEventListener("change", setSchemaFromPreset);
+    applyModeDefaults();
+    modeEl.addEventListener("change", applyModeDefaults);
 
     async function pdfToText(file) {
       const arrayBuffer = await file.arrayBuffer();
@@ -232,14 +247,12 @@
     }
 
     function extractAbstractOnly(fullText) {
-      // Simple heuristic (frontend-only). If not found, fall back to full text.
       const t = fullText || "";
       const lower = t.toLowerCase();
 
       const absIdx = lower.search(/\babstract\b/);
       if (absIdx < 0) return t;
 
-      // try to end at introduction / keywords / first section heading
       const after = t.slice(absIdx);
       const endCandidates = [
         /\bintroduction\b/i,
@@ -266,8 +279,11 @@
         statusEl.textContent = "Extracting text from PDF in the browser...";
         pdfText = await pdfToText(f);
 
-        previewEl.textContent = pdfText.slice(0, 2000) + (pdfText.length > 2000 ? "\n\n...[truncated]" : "");
-        statusEl.innerHTML = `<span class="ok">Loaded PDF text</span> (${pdfText.length.toLocaleString()} characters). Ready to run extraction.`;
+        previewEl.textContent =
+          pdfText.slice(0, 2000) + (pdfText.length > 2000 ? "\n\n...[truncated]" : "");
+
+        statusEl.innerHTML =
+          `<span class="ok">Loaded PDF text</span> (${pdfText.length.toLocaleString()} characters). Ready to run extraction.`;
       } catch (e) {
         console.error(e);
         statusEl.textContent = "Failed to extract PDF text.";
@@ -291,9 +307,8 @@
 
         const provider = document.getElementById("provider").value;
         const modelInput = document.getElementById("model").value.trim();
-        const mode = document.getElementById("mode").value;
+        const mode = modeEl.value;
         const retrievalMode = document.getElementById("retrievalMode").value;
-        const includeDebug = document.getElementById("includeDebug").value === "true";
 
         let sourceText = pdfText;
         if (retrievalMode === "abstract_only") {
@@ -312,7 +327,7 @@
             model: modelInput || undefined,
             mode,
             retrieval_mode: retrievalMode,
-            include_debug: includeDebug,
+            include_debug: includeDebug,   // auto set from mode
             prompt,
             schema
           })
