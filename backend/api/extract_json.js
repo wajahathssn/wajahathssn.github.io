@@ -134,6 +134,121 @@ async function callProvider({ provider, model, system, user }) {
   }
 }
 
+function buildExtractSystemPrompt() {
+  return [
+    "You are a strict information extraction engine.",
+    "Return ONLY valid JSON. No markdown. No extra text.",
+    "The JSON MUST validate against the provided JSON Schema.",
+    "If something is not present in the input, use empty arrays/strings; do NOT guess.",
+    "Never include explanations."
+  ].join(" ");
+}
+
+function buildVerifySystemPrompt() {
+  return [
+    "You are a strict JSON verification and repair engine for information extraction.",
+    "You will receive source text, a candidate JSON extraction, and a JSON Schema.",
+    "Return ONLY valid JSON that matches the schema.",
+    "Remove unsupported claims/properties.",
+    "Fix obvious misattributions only if directly supported by the source text.",
+    "Do not invent new facts.",
+    "Do not include explanations."
+  ].join(" ");
+}
+
+async function runOneShot({ provider, model, prompt, schema, validate }) {
+  const system = buildExtractSystemPrompt();
+  const user = JSON.stringify({ prompt, schema });
+
+  let lastRaw = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const raw = await callProvider({ provider, model, system, user });
+    lastRaw = raw;
+
+    const parsed = safeJsonParse(raw);
+    if (!parsed.ok) continue;
+
+    if (validate(parsed.value)) {
+      return { ok: true, result: parsed.value, raw: raw };
+    }
+  }
+
+  return {
+    ok: false,
+    error: "Model output did not validate against schema",
+    raw: lastRaw
+  };
+}
+
+async function runTwoShot({ provider, model, prompt, schema, validate }) {
+  // Pass 1: extract candidate JSON
+  const extractSystem = buildExtractSystemPrompt();
+  const extractUser = JSON.stringify({ prompt, schema });
+
+  let pass1Raw = "";
+  let pass1Parsed = null;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const raw = await callProvider({ provider, model, system: extractSystem, user: extractUser });
+    pass1Raw = raw;
+
+    const parsed = safeJsonParse(raw);
+    if (!parsed.ok) continue;
+
+    pass1Parsed = parsed.value;
+    break;
+  }
+
+  if (!pass1Parsed) {
+    return {
+      ok: false,
+      error: "Two-shot pass 1 failed to produce parseable JSON",
+      raw: pass1Raw
+    };
+  }
+
+  // Pass 2: verify + repair candidate JSON
+  const verifySystem = buildVerifySystemPrompt();
+  const verifyUser = JSON.stringify({
+    source_text: prompt,
+    candidate_json: pass1Parsed,
+    schema
+  });
+
+  let pass2Raw = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const raw = await callProvider({ provider, model, system: verifySystem, user: verifyUser });
+    pass2Raw = raw;
+
+    const parsed = safeJsonParse(raw);
+    if (!parsed.ok) continue;
+
+    if (validate(parsed.value)) {
+      return {
+        ok: true,
+        result: parsed.value,
+        raw: pass2Raw
+      };
+    }
+  }
+
+  // Fallback: if pass 2 fails but pass 1 is valid, return pass 1
+  if (validate(pass1Parsed)) {
+    return {
+      ok: true,
+      result: pass1Parsed,
+      raw: pass1Raw,
+      warning: "Two-shot verification failed; returned pass-1 extraction"
+    };
+  }
+
+  return {
+    ok: false,
+    error: "Two-shot verification output did not validate against schema",
+    raw: pass2Raw || pass1Raw
+  };
+}
+
 export default async function handler(req, res) {
   setCors(res);
 
@@ -148,7 +263,7 @@ export default async function handler(req, res) {
       if (got !== required) return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const { prompt, schema, provider, model } = req.body || {};
+    const { prompt, schema, provider, model, mode, retrieval_mode } = req.body || {};
     if (!prompt || typeof prompt !== "string") return res.status(400).json({ error: "Missing prompt string" });
     if (!schema || typeof schema !== "object") return res.status(400).json({ error: "Missing schema object" });
 
@@ -162,39 +277,38 @@ export default async function handler(req, res) {
       "gpt-4o-mini";
 
     const m = model || defaultModel;
+    const extractionMode = mode || "one_shot";
+    const retrievalMode = retrieval_mode || "full_text";
 
     const validate = ajv.compile(schema);
 
-    const system = [
-      "You are a strict information extraction engine.",
-      "Return ONLY valid JSON. No markdown. No extra text.",
-      "The JSON MUST validate against the provided JSON Schema.",
-      "If something is not present in the input, use empty arrays/strings; do NOT guess.",
-      "Never include explanations."
-    ].join(" ");
+    const runResult =
+      extractionMode === "two_shot"
+        ? await runTwoShot({ provider: p, model: m, prompt, schema, validate })
+        : await runOneShot({ provider: p, model: m, prompt, schema, validate });
 
-    const user = JSON.stringify({ prompt, schema });
-
-    let lastRaw = "";
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      const raw = await callProvider({ provider: p, model: m, system, user });
-      lastRaw = raw;
-
-      const parsed = safeJsonParse(raw);
-      if (!parsed.ok) continue;
-
-      if (validate(parsed.value)) {
-        return res.status(200).json({ ok: true, provider: p, model: m, result: parsed.value });
-      }
+    if (!runResult.ok) {
+      return res.status(422).json({
+        ok: false,
+        provider: p,
+        model: m,
+        mode: extractionMode,
+        retrieval_mode: retrievalMode,
+        error: runResult.error,
+        raw: runResult.raw
+      });
     }
 
-    return res.status(422).json({
-      ok: false,
+    return res.status(200).json({
+      ok: true,
       provider: p,
       model: m,
-      error: "Model output did not validate against schema",
-      raw: lastRaw
+      mode: extractionMode,
+      retrieval_mode: retrievalMode,
+      warning: runResult.warning,
+      result: runResult.result
     });
+
   } catch (err) {
     return res.status(500).json({ error: String(err?.message || err) });
   }
