@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Scientific Literature → JSON Extraction</title>
   <style>
-    body { font-family: system-ui; max-width: 1050px; margin: 32px auto; padding: 0 16px; }
+    body { font-family: system-ui; max-width: 1200px; margin: 32px auto; padding: 0 16px; }
     textarea, input, select { width: 100%; box-sizing: border-box; }
     textarea { min-height: 110px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
     pre { background: #f6f8fa; padding: 12px; border-radius: 10px; overflow:auto; white-space: pre-wrap; }
@@ -34,13 +34,24 @@
       border-radius: 6px;
       font-size: 12px;
     }
+    .review-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(260px, 1fr));
+      gap: 12px;
+    }
+    @media (max-width: 900px) {
+      .review-grid { grid-template-columns: 1fr; }
+    }
+    .review-card h4 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
   <h1>Scientific Literature → JSON Extractor</h1>
   <p>
     <small class="pill">Wajahat Hussain</small>
-    
   </p>
 
   <div class="card">
@@ -104,31 +115,45 @@
 
     <div class="row" style="margin-top:12px;">
       <button id="runBtn" style="flex:1; min-width:220px;">Run Extraction</button>
+      <button id="reviewBtn" style="flex:1; min-width:220px;">Run Cross-Model Review</button>
       <button id="downloadBtn" style="flex:1; min-width:220px;">Download JSON</button>
       <button id="copyBtn" style="flex:1; min-width:220px;">Copy JSON</button>
     </div>
+  </div>
 
   <div class="card">
     <h3>Result (JSON)</h3>
     <pre id="out">{}</pre>
   </div>
 
+  <div class="card">
+    <h3>Cross-Model Review</h3>
+    <p class="tiny muted">Reviews the current extraction JSON against the abstract using Claude, Gemini, and DeepSeek.</p>
+    <div class="review-grid">
+      <div class="review-card">
+        <h4>Claude</h4>
+        <pre id="review-anthropic">{}</pre>
+      </div>
+      <div class="review-card">
+        <h4>Gemini</h4>
+        <pre id="review-gemini">{}</pre>
+      </div>
+      <div class="review-card">
+        <h4>DeepSeek</h4>
+        <pre id="review-deepseek">{}</pre>
+      </div>
+    </div>
+  </div>
+
   <script type="module">
     const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
 
-    // =========================================================
-    // BASELINE ONE-SHOT PROMPT (frozen exactly as before)
-    // =========================================================
     const ONE_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract.";
 
-    // New two-shot prompt (qualifier-aware)
     const TWO_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.";
 
-    // =========================================================
-    // SCHEMAS
-    // =========================================================
     const BASIC_SCHEMA = `{
   "type": "object",
   "properties": {
@@ -185,7 +210,7 @@
 
     let pdfText = "";
     let abstractText = "";
-    let includeDebug = false; // mode-controlled
+    let includeDebug = false;
 
     const statusEl = document.getElementById("status");
     const previewEl = document.getElementById("preview");
@@ -197,11 +222,14 @@
     const schemaHintEl = document.getElementById("schemaHint");
     const modeInfoEl = document.getElementById("modeInfo");
 
+    const reviewAnthropicEl = document.getElementById("review-anthropic");
+    const reviewGeminiEl = document.getElementById("review-gemini");
+    const reviewDeepseekEl = document.getElementById("review-deepseek");
+
     function applyModeDefaults() {
       const mode = modeEl.value;
 
       if (mode === "one_shot") {
-        // Freeze one-shot baseline behavior
         schemaEl.value = BASIC_SCHEMA;
         includeDebug = false;
 
@@ -214,7 +242,6 @@
           </div>
         `;
       } else {
-        // Two-shot experimental/improved mode
         schemaEl.value = CONTEXTUAL_SCHEMA;
         includeDebug = true;
 
@@ -227,6 +254,28 @@
           </div>
         `;
       }
+    }
+
+    function clearReviews() {
+      reviewAnthropicEl.textContent = "{}";
+      reviewGeminiEl.textContent = "{}";
+      reviewDeepseekEl.textContent = "{}";
+    }
+
+    function prettyReviewBlock(obj) {
+      if (!obj) return "{}";
+      if (!obj.ok) return JSON.stringify(obj, null, 2);
+
+      const r = obj.review || {};
+      return JSON.stringify({
+        model: obj.model,
+        correct_observations_count: r.correct_observations_count,
+        incorrect_observations_count: r.incorrect_observations_count,
+        correct_observations: r.correct_observations,
+        incorrect_observations: r.incorrect_observations,
+        missing_observations: r.missing_observations,
+        additional_notes: r.additional_notes
+      }, null, 2);
     }
 
     applyModeDefaults();
@@ -254,16 +303,13 @@
       const t = fullText || "";
       const lower = t.toLowerCase();
 
-      // Find "Abstract"
       const absIdx = lower.search(/\babstract\b/);
       if (absIdx < 0) {
-        // Fallback: first chunk
         return t.slice(0, 4500).trim();
       }
 
       const after = t.slice(absIdx);
 
-      // Common abstract end markers
       const endCandidates = [
         /\bkeywords\b/i,
         /\bkey words\b/i,
@@ -290,6 +336,7 @@
         statusEl.textContent = "Extracting text from PDF in the browser...";
         pdfText = await pdfToText(f);
         abstractText = extractAbstractOnly(pdfText);
+        clearReviews();
 
         previewEl.textContent =
           pdfText.slice(0, 2000) + (pdfText.length > 2000 ? "\n\n...[truncated]" : "");
@@ -322,13 +369,11 @@
         const modelInput = document.getElementById("model").value.trim();
         const mode = modeEl.value;
 
-        // IMPORTANT: one-shot stays baseline, two-shot uses new prompt
         const instruction = mode === "one_shot" ? ONE_SHOT_INSTRUCTION : TWO_SHOT_INSTRUCTION;
-
-        // ALWAYS abstract-only
         const prompt = `DOCUMENT TEXT:\n${abstractText}\n\nTASK:\n${instruction}`;
 
         outEl.textContent = "Calling backend...";
+        clearReviews();
 
         const r = await fetch(`${API_BASE}/extract_json`, {
           method: "POST",
@@ -336,9 +381,9 @@
           body: JSON.stringify({
             provider,
             model: modelInput || undefined,
-            mode,                         // "one_shot" or "two_shot"
-            retrieval_mode: "abstract_only", // fixed
-            include_debug: includeDebug,  // auto by mode
+            mode,
+            retrieval_mode: "abstract_only",
+            include_debug: includeDebug,
             prompt,
             schema
           })
@@ -355,6 +400,65 @@
       } catch (e) {
         console.error(e);
         outEl.textContent = JSON.stringify({ error: String(e?.message || e) }, null, 2);
+      }
+    };
+
+    document.getElementById("reviewBtn").onclick = async () => {
+      try {
+        if (!abstractText) return alert("Load a PDF first.");
+        if (!outEl.textContent || outEl.textContent.trim() === "{}") {
+          return alert("Run extraction first so there is a JSON output to review.");
+        }
+
+        let schema;
+        try {
+          schema = JSON.parse(schemaEl.value);
+        } catch {
+          return alert("Schema is not valid JSON.");
+        }
+
+        let candidate;
+        try {
+          const parsed = JSON.parse(outEl.textContent);
+          candidate = parsed.result ?? parsed;
+        } catch {
+          return alert("Current output is not valid JSON. Run extraction again first.");
+        }
+
+        reviewAnthropicEl.textContent = "Reviewing...";
+        reviewGeminiEl.textContent = "Reviewing...";
+        reviewDeepseekEl.textContent = "Reviewing...";
+
+        const r = await fetch(`${API_BASE}/review_json`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_text: abstractText,
+            schema,
+            candidate_json: candidate,
+            reviewers: ["anthropic", "gemini", "deepseek"]
+          })
+        });
+
+        const data = await r.json();
+
+        if (!r.ok) {
+          const errText = JSON.stringify(data, null, 2);
+          reviewAnthropicEl.textContent = errText;
+          reviewGeminiEl.textContent = errText;
+          reviewDeepseekEl.textContent = errText;
+          return;
+        }
+
+        const reviews = data.reviewers || {};
+        reviewAnthropicEl.textContent = prettyReviewBlock(reviews.anthropic);
+        reviewGeminiEl.textContent = prettyReviewBlock(reviews.gemini);
+        reviewDeepseekEl.textContent = prettyReviewBlock(reviews.deepseek);
+      } catch (e) {
+        const msg = JSON.stringify({ error: String(e?.message || e) }, null, 2);
+        reviewAnthropicEl.textContent = msg;
+        reviewGeminiEl.textContent = msg;
+        reviewDeepseekEl.textContent = msg;
       }
     };
 
