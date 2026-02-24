@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Scientific Literature → JSON ExtractionTest</title>
+  <title>Scientific Literature → JSON Extraction</title>
   <style>
     body { font-family: system-ui; max-width: 1050px; margin: 32px auto; padding: 0 16px; }
     textarea, input, select { width: 100%; box-sizing: border-box; }
@@ -38,7 +38,7 @@
 <body>
   <h1>Scientific Literature → JSON Extractor</h1>
   <p>
-    <small class="pill">Frontend: GitHub PagesTest</small>
+    <small class="pill">Frontend: GitHub Pages</small>
     <small class="pill">Backend: Vercel API</small>
     <small class="pill">One-shot + Two-shot</small>
   </p>
@@ -103,10 +103,7 @@
       </label>
     </div>
 
-    <h3 style="margin-top:14px;">3) Extraction instruction</h3>
-    <textarea id="query">Extract mentions of materials and the properties they have which are mentioned in the paper. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.</textarea>
-
-    <h3 style="margin-top:14px;">4) JSON Schema</h3>
+    <h3 style="margin-top:14px;">3) JSON Schema</h3>
     <p class="tiny muted" id="schemaHint"></p>
     <textarea id="schema"></textarea>
 
@@ -117,7 +114,7 @@
     </div>
 
     <p class="tiny muted" style="margin-top:10px;">
-      Tip: One-shot is faster. Two-shot is slower but usually more reliable because it verifies/repairs the first extraction.
+      One-shot uses a simple extraction prompt. Two-shot uses a qualifier-aware extraction prompt + verification pass.
     </p>
   </div>
 
@@ -128,6 +125,13 @@
 
   <script type="module">
     const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
+
+    // Hidden internal prompts (not shown in UI)
+    const ONE_SHOT_INSTRUCTION =
+      "Extract mentions of materials and the properties they have which are mentioned in the abstract.";
+
+    const TWO_SHOT_INSTRUCTION =
+      "Extract mentions of materials and the properties they have which are mentioned in the paper. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.";
 
     const BASIC_SCHEMA = `{
   "type": "object",
@@ -201,25 +205,25 @@
       if (mode === "one_shot") {
         schemaEl.value = BASIC_SCHEMA;
         includeDebug = false;
-        schemaHintEl.innerHTML = `Auto schema: <code class="inline">basic</code> (simple materials → properties → evidence). Debug is <strong>OFF</strong>.`;
+        schemaHintEl.innerHTML = `Auto schema: <code class="inline">basic</code>. Debug is <strong>OFF</strong>. Hidden prompt: abstract-focused simple extraction.`;
 
         modeInfoEl.innerHTML = `
           <div class="mode-title">One-shot mode</div>
           <div class="tiny muted">
-            Single model call. Faster and cheaper. Good for quick comparisons across providers.
-            Uses the <strong>basic schema</strong> and returns a simpler JSON structure.
+            Single model call. Faster and cheaper. Uses your original prompt style
+            (focused on extracting material-property mentions from the abstract) and the <strong>basic schema</strong>.
           </div>
         `;
       } else {
         schemaEl.value = CONTEXTUAL_SCHEMA;
         includeDebug = true;
-        schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code> (qualifiers / conditions / values). Debug is <strong>ON</strong> (includes verification plan).`;
+        schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code>. Debug is <strong>ON</strong>. Hidden prompt: qualifier-aware extraction for full paper context.`;
 
         modeInfoEl.innerHTML = `
           <div class="mode-title">Two-shot mode (recommended)</div>
           <div class="tiny muted">
             Pass 1 extracts candidate claims. Pass 2 generates a <strong>paper-specific verification plan</strong> and repairs/verifies the extraction.
-            Uses the <strong>contextual schema</strong> and preserves qualifiers/conditions when possible.
+            Uses a qualifier-aware prompt and the <strong>contextual schema</strong> (conditions / values / evidence).
           </div>
         `;
       }
@@ -295,9 +299,6 @@
       try {
         if (!pdfText) return alert("Load PDF text first (click 'Load PDF Text').");
 
-        const query = document.getElementById("query").value.trim();
-        if (!query) return alert("Enter an extraction instruction.");
-
         let schema;
         try {
           schema = JSON.parse(schemaEl.value);
@@ -315,6 +316,9 @@
           sourceText = extractAbstractOnly(pdfText);
         }
 
+        // Hidden prompt chosen automatically from mode
+        const query = mode === "one_shot" ? ONE_SHOT_INSTRUCTION : TWO_SHOT_INSTRUCTION;
+
         outEl.textContent = "Calling backend...";
 
         const prompt = `DOCUMENT TEXT:\n${sourceText}\n\nTASK:\n${query}`;
@@ -327,7 +331,7 @@
             model: modelInput || undefined,
             mode,
             retrieval_mode: retrievalMode,
-            include_debug: includeDebug,   // auto set from mode
+            include_debug: includeDebug,
             prompt,
             schema
           })
