@@ -5,18 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Scientific Literature → JSON Extraction</title>
   <style>
-    body { font-family: system-ui; max-width: 980px; margin: 40px auto; padding: 0 16px; }
-    textarea, input, select { width: 100%; }
-    textarea { min-height: 110px; }
-    pre { background: #f6f8fa; padding: 12px; border-radius: 10px; overflow:auto; }
+    body { font-family: system-ui; max-width: 1050px; margin: 32px auto; padding: 0 16px; }
+    textarea, input, select { width: 100%; box-sizing: border-box; }
+    textarea { min-height: 110px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    pre { background: #f6f8fa; padding: 12px; border-radius: 10px; overflow:auto; white-space: pre-wrap; }
     .row { display:flex; gap:12px; flex-wrap:wrap; align-items: end; }
     button { padding: 10px 14px; cursor:pointer; }
     input[type="file"] { padding: 8px; }
     .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; margin-top: 12px; }
     small { color: #555; }
-    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eef2ff; font-size:12px; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eef2ff; font-size:12px; margin-right:6px; }
     label small { display:block; margin-bottom:6px; }
-    .note { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:10px; margin-top:10px; }
+    .muted { color: #666; }
+    .tiny { font-size: 12px; }
+    .right { margin-left:auto; }
+    .ok { color: #0a7f3f; }
+    .warn { color: #b45309; }
   </style>
 </head>
 <body>
@@ -24,7 +28,7 @@
   <p>
     <small class="pill">Frontend: GitHub Pages</small>
     <small class="pill">Backend: Vercel API</small>
-    <small class="pill">One-shot / Two-shot</small>
+    <small class="pill">One-shot + Two-shot</small>
   </p>
 
   <div class="card">
@@ -48,12 +52,86 @@
   </div>
 
   <div class="card">
-    <h3>2) Extraction instruction</h3>
-    <textarea id="query">Extract mentions of materials and the properties they have which are mentioned in the abstract.</textarea>
+    <h3>2) Extraction setup</h3>
 
-    <h3 style="margin-top:14px;">3) JSON Schema</h3>
-    <textarea id="schema">
-{
+    <div class="row">
+      <label style="flex:1; min-width:220px;">
+        <small>Mode</small>
+        <select id="mode" style="padding:10px;">
+          <option value="one_shot">One-shot</option>
+          <option value="two_shot" selected>Two-shot (extract → verify)</option>
+        </select>
+      </label>
+
+      <label style="flex:1; min-width:220px;">
+        <small>Retrieval mode</small>
+        <select id="retrievalMode" style="padding:10px;">
+          <option value="full_text" selected>Full text (current)</option>
+          <option value="abstract_only">Abstract only (label only for now)</option>
+        </select>
+      </label>
+
+      <label style="flex:1; min-width:220px;">
+        <small>Schema preset</small>
+        <select id="schemaPreset" style="padding:10px;">
+          <option value="basic">Basic (material + properties + evidence)</option>
+          <option value="contextual" selected>Contextual (qualifiers/conditions)</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <label style="flex:1; min-width:220px;">
+        <small>Provider</small>
+        <select id="provider" style="padding:10px;">
+          <option value="openai" selected>OpenAI</option>
+          <option value="anthropic">Claude (Anthropic)</option>
+          <option value="gemini">Gemini (Google)</option>
+          <option value="deepseek">DeepSeek</option>
+        </select>
+      </label>
+
+      <label style="flex:2; min-width:280px;">
+        <small>Model (optional)</small>
+        <input id="model" placeholder="Leave blank to use backend default (OpenAI default = gpt-4o)" style="padding:10px;" />
+      </label>
+
+      <label style="flex:1; min-width:220px;">
+        <small>Debug output</small>
+        <select id="includeDebug" style="padding:10px;">
+          <option value="false">Off</option>
+          <option value="true" selected>On (show verification plan)</option>
+        </select>
+      </label>
+    </div>
+
+    <h3 style="margin-top:14px;">3) Extraction instruction</h3>
+    <textarea id="query">Extract mentions of materials and the properties they have which are mentioned in the paper. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.</textarea>
+
+    <h3 style="margin-top:14px;">4) JSON Schema</h3>
+    <textarea id="schema"></textarea>
+
+    <div class="row" style="margin-top:12px;">
+      <button id="runBtn" style="flex:1; min-width:220px;">Run Extraction</button>
+      <button id="downloadBtn" style="flex:1; min-width:220px;">Download JSON</button>
+      <button id="copyBtn" style="flex:1; min-width:220px;">Copy JSON</button>
+    </div>
+
+    <p class="tiny muted" style="margin-top:10px;">
+      Tip: If you get a CORS error, make sure your backend allows <code>https://wajahathssn.github.io</code>.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Result (JSON)</h3>
+    <pre id="out">{}</pre>
+  </div>
+
+  <script type="module">
+    // Change this only if your Vercel URL changes
+    const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
+
+    const BASIC_SCHEMA = `{
   "type": "object",
   "properties": {
     "items": {
@@ -70,72 +148,70 @@
     }
   },
   "required": ["items"]
-}
-    </textarea>
+}`;
 
-    <h3 style="margin-top:14px;">4) Model</h3>
-    <div class="row">
-      <label style="flex:1; min-width:220px;">
-        <small>Provider</small>
-        <select id="provider" style="padding:10px;">
-          <option value="openai">OpenAI</option>
-          <option value="anthropic">Claude (Anthropic)</option>
-          <option value="gemini">Gemini (Google)</option>
-          <option value="deepseek">DeepSeek</option>
-        </select>
-      </label>
-
-      <label style="flex:2; min-width:280px;">
-        <small>Model (optional)</small>
-        <input id="model" placeholder="Leave blank to use default for provider" style="padding:10px;" />
-      </label>
-    </div>
-
-    <h3 style="margin-top:14px;">5) Extraction Mode</h3>
-    <div class="row">
-      <label style="flex:1; min-width:220px;">
-        <small>Mode</small>
-        <select id="mode" style="padding:10px;">
-          <option value="one_shot">One-shot (faster)</option>
-          <option value="two_shot">Two-shot (extract + verify)</option>
-        </select>
-      </label>
-
-      <label style="flex:1; min-width:220px;">
-        <small>Retrieval Mode (future)</small>
-        <select id="retrievalMode" style="padding:10px;">
-          <option value="full_text">Full text</option>
-          <option value="rag_keyword">RAG keyword (coming soon)</option>
-          <option value="rag_embedding">RAG embedding (coming soon)</option>
-        </select>
-      </label>
-    </div>
-
-    <div class="note">
-      <small>
-        <b>Note:</b> The mode and retrieval options are sent to the backend now. If your backend hasn’t been updated yet,
-        it may ignore them and still run one-shot full-text extraction.
-      </small>
-    </div>
-
-    <div class="row" style="margin-top:12px;">
-      <button id="runBtn" style="flex:1; min-width:220px;">Run Extraction</button>
-      <button id="downloadBtn" style="flex:1; min-width:220px;">Download JSON</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <h3>Result (JSON)</h3>
-    <pre id="out">{}</pre>
-  </div>
-
-  <script type="module">
-    const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
+    const CONTEXTUAL_SCHEMA = `{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "material": { "type": "string" },
+          "entity_role": { "type": "string" },
+          "properties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "property": { "type": "string" },
+                "value": { "type": "string" },
+                "unit": { "type": "string" },
+                "qualifier": { "type": "string" },
+                "conditions": { "type": "string" },
+                "applies_to": { "type": "string" },
+                "evidence": { "type": "string" }
+              },
+              "required": ["property"]
+            }
+          },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["material", "properties"]
+      }
+    }
+  },
+  "required": ["items"]
+}`;
 
     let pdfText = "";
     const statusEl = document.getElementById("status");
     const previewEl = document.getElementById("preview");
     const outEl = document.getElementById("out");
+
+    const schemaEl = document.getElementById("schema");
+    const schemaPresetEl = document.getElementById("schemaPreset");
+    const modeEl = document.getElementById("mode");
+
+    function setSchemaFromPreset() {
+      const preset = schemaPresetEl.value;
+      schemaEl.value = preset === "basic" ? BASIC_SCHEMA : CONTEXTUAL_SCHEMA;
+    }
+
+    // Initialize default schema
+    setSchemaFromPreset();
+
+    // Optional: auto-switch schema when mode changes
+    modeEl.addEventListener("change", () => {
+      // Two-shot defaults to contextual because it's more useful for verification
+      if (modeEl.value === "two_shot" && schemaPresetEl.value === "basic") {
+        schemaPresetEl.value = "contextual";
+        setSchemaFromPreset();
+      }
+    });
+
+    schemaPresetEl.addEventListener("change", setSchemaFromPreset);
 
     async function pdfToText(file) {
       const arrayBuffer = await file.arrayBuffer();
@@ -155,6 +231,33 @@
       return text.trim();
     }
 
+    function extractAbstractOnly(fullText) {
+      // Simple heuristic (frontend-only). If not found, fall back to full text.
+      const t = fullText || "";
+      const lower = t.toLowerCase();
+
+      const absIdx = lower.search(/\babstract\b/);
+      if (absIdx < 0) return t;
+
+      // try to end at introduction / keywords / first section heading
+      const after = t.slice(absIdx);
+      const endCandidates = [
+        /\bintroduction\b/i,
+        /\bkeywords\b/i,
+        /\b1[\.\s]+introduction\b/i,
+        /\bbackground\b/i
+      ];
+
+      let end = -1;
+      for (const re of endCandidates) {
+        const m = after.search(re);
+        if (m > 20 && (end === -1 || m < end)) end = m;
+      }
+
+      const abstractBlock = end > 0 ? after.slice(0, end) : after.slice(0, 4000);
+      return abstractBlock.trim();
+    }
+
     document.getElementById("loadBtn").onclick = async () => {
       try {
         const f = document.getElementById("pdf").files[0];
@@ -164,7 +267,7 @@
         pdfText = await pdfToText(f);
 
         previewEl.textContent = pdfText.slice(0, 2000) + (pdfText.length > 2000 ? "\n\n...[truncated]" : "");
-        statusEl.textContent = `Loaded PDF text (${pdfText.length.toLocaleString()} characters). Ready to run extraction.`;
+        statusEl.innerHTML = `<span class="ok">Loaded PDF text</span> (${pdfText.length.toLocaleString()} characters). Ready to run extraction.`;
       } catch (e) {
         console.error(e);
         statusEl.textContent = "Failed to extract PDF text.";
@@ -181,7 +284,7 @@
 
         let schema;
         try {
-          schema = JSON.parse(document.getElementById("schema").value);
+          schema = JSON.parse(schemaEl.value);
         } catch {
           return alert("Schema is not valid JSON.");
         }
@@ -190,10 +293,16 @@
         const modelInput = document.getElementById("model").value.trim();
         const mode = document.getElementById("mode").value;
         const retrievalMode = document.getElementById("retrievalMode").value;
+        const includeDebug = document.getElementById("includeDebug").value === "true";
+
+        let sourceText = pdfText;
+        if (retrievalMode === "abstract_only") {
+          sourceText = extractAbstractOnly(pdfText);
+        }
 
         outEl.textContent = "Calling backend...";
 
-        const prompt = `DOCUMENT TEXT:\n${pdfText}\n\nTASK:\n${query}`;
+        const prompt = `DOCUMENT TEXT:\n${sourceText}\n\nTASK:\n${query}`;
 
         const r = await fetch(`${API_BASE}/extract_json`, {
           method: "POST",
@@ -203,6 +312,7 @@
             model: modelInput || undefined,
             mode,
             retrieval_mode: retrievalMode,
+            include_debug: includeDebug,
             prompt,
             schema
           })
@@ -215,7 +325,6 @@
           return;
         }
 
-        // backend returns { ok, provider, model, result } (and later may include mode/retrieval info too)
         outEl.textContent = JSON.stringify(data, null, 2);
       } catch (e) {
         console.error(e);
@@ -231,6 +340,15 @@
       a.download = "extraction-result.json";
       a.click();
       URL.revokeObjectURL(a.href);
+    };
+
+    document.getElementById("copyBtn").onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(outEl.textContent || "{}");
+        alert("JSON copied to clipboard.");
+      } catch {
+        alert("Could not copy. You can select and copy manually.");
+      }
     };
   </script>
 </body>
