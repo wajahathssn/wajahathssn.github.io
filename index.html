@@ -16,6 +16,7 @@
     small { color: #555; }
     .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eef2ff; font-size:12px; }
     label small { display:block; margin-bottom:6px; }
+    .note { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:10px; margin-top:10px; }
   </style>
 </head>
 <body>
@@ -23,6 +24,7 @@
   <p>
     <small class="pill">Frontend: GitHub Pages</small>
     <small class="pill">Backend: Vercel API</small>
+    <small class="pill">One-shot / Two-shot</small>
   </p>
 
   <div class="card">
@@ -87,6 +89,33 @@
         <small>Model (optional)</small>
         <input id="model" placeholder="Leave blank to use default for provider" style="padding:10px;" />
       </label>
+    </div>
+
+    <h3 style="margin-top:14px;">5) Extraction Mode</h3>
+    <div class="row">
+      <label style="flex:1; min-width:220px;">
+        <small>Mode</small>
+        <select id="mode" style="padding:10px;">
+          <option value="one_shot">One-shot (faster)</option>
+          <option value="two_shot">Two-shot (extract + verify)</option>
+        </select>
+      </label>
+
+      <label style="flex:1; min-width:220px;">
+        <small>Retrieval Mode (future)</small>
+        <select id="retrievalMode" style="padding:10px;">
+          <option value="full_text">Full text</option>
+          <option value="rag_keyword">RAG keyword (coming soon)</option>
+          <option value="rag_embedding">RAG embedding (coming soon)</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="note">
+      <small>
+        <b>Note:</b> The mode and retrieval options are sent to the backend now. If your backend hasn’t been updated yet,
+        it may ignore them and still run one-shot full-text extraction.
+      </small>
     </div>
 
     <div class="row" style="margin-top:12px;">
@@ -159,6 +188,8 @@
 
         const provider = document.getElementById("provider").value;
         const modelInput = document.getElementById("model").value.trim();
+        const mode = document.getElementById("mode").value;
+        const retrievalMode = document.getElementById("retrievalMode").value;
 
         outEl.textContent = "Calling backend...";
 
@@ -170,6 +201,8 @@
           body: JSON.stringify({
             provider,
             model: modelInput || undefined,
+            mode,
+            retrieval_mode: retrievalMode,
             prompt,
             schema
           })
@@ -182,7 +215,7 @@
           return;
         }
 
-        // backend returns { ok, provider, model, result }
+        // backend returns { ok, provider, model, result } (and later may include mode/retrieval info too)
         outEl.textContent = JSON.stringify(data, null, 2);
       } catch (e) {
         console.error(e);
