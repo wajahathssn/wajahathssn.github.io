@@ -15,11 +15,9 @@
     .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; margin-top: 12px; }
     small { color: #555; }
     .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eef2ff; font-size:12px; margin-right:6px; }
-    label small { display:block; margin-bottom:6px; }
-    .muted { color: #666; }
     .tiny { font-size: 12px; }
+    .muted { color: #666; }
     .ok { color: #0a7f3f; }
-    .warn { color: #9a6700; }
     .mode-box {
       background: #f8fafc;
       border: 1px solid #e2e8f0;
@@ -50,9 +48,7 @@
 </head>
 <body>
   <h1>Scientific Literature → JSON Extractor</h1>
-  <p>
-    <small class="pill">Wajahat Hussain</small>
-  </p>
+  <p><small class="pill">Wajahat Hussain</small></p>
 
   <div class="card">
     <h3>1) Choose a PDF</h3>
@@ -83,15 +79,15 @@
     <h3>2) Extraction setup</h3>
 
     <div class="row">
-      <label style="flex:1; min-width:240px;">
+      <div style="flex:1; min-width:240px;">
         <small>Mode</small>
         <select id="mode" style="padding:10px;">
           <option value="one_shot" selected>One-shot (baseline)</option>
           <option value="two_shot">Two-shot (extract → verify)</option>
         </select>
-      </label>
+      </div>
 
-      <label style="flex:1; min-width:240px;">
+      <div style="flex:1; min-width:240px;">
         <small>Provider</small>
         <select id="provider" style="padding:10px;">
           <option value="openai" selected>OpenAI</option>
@@ -99,12 +95,12 @@
           <option value="gemini">Gemini (Google)</option>
           <option value="deepseek">DeepSeek</option>
         </select>
-      </label>
+      </div>
 
-      <label style="flex:2; min-width:280px;">
+      <div style="flex:2; min-width:280px;">
         <small>Model (optional)</small>
         <input id="model" placeholder="Leave blank to use backend default (OpenAI default = gpt-4o)" style="padding:10px;" />
-      </label>
+      </div>
     </div>
 
     <div id="modeInfo" class="mode-box"></div>
@@ -128,19 +124,19 @@
 
   <div class="card">
     <h3>Cross-Model Review</h3>
-    <p class="tiny muted">Reviews the current extraction JSON against the abstract using Claude, Gemini, and DeepSeek.</p>
+    <p class="tiny muted">Runs review against the current extraction JSON using the other 3 providers (excluding the one you used for extraction).</p>
     <div class="review-grid">
       <div class="review-card">
-        <h4>Claude</h4>
-        <pre id="review-anthropic">{}</pre>
+        <h4 id="review-title-1">Reviewer 1</h4>
+        <pre id="review-1">{}</pre>
       </div>
       <div class="review-card">
-        <h4>Gemini</h4>
-        <pre id="review-gemini">{}</pre>
+        <h4 id="review-title-2">Reviewer 2</h4>
+        <pre id="review-2">{}</pre>
       </div>
       <div class="review-card">
-        <h4>DeepSeek</h4>
-        <pre id="review-deepseek">{}</pre>
+        <h4 id="review-title-3">Reviewer 3</h4>
+        <pre id="review-3">{}</pre>
       </div>
     </div>
   </div>
@@ -148,9 +144,11 @@
   <script type="module">
     const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
 
+    // One-shot baseline (unchanged)
     const ONE_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract.";
 
+    // Two-shot prompt (qualifier-aware)
     const TWO_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.";
 
@@ -218,13 +216,28 @@
     const outEl = document.getElementById("out");
 
     const modeEl = document.getElementById("mode");
+    const providerEl = document.getElementById("provider");
     const schemaEl = document.getElementById("schema");
     const schemaHintEl = document.getElementById("schemaHint");
     const modeInfoEl = document.getElementById("modeInfo");
 
-    const reviewAnthropicEl = document.getElementById("review-anthropic");
-    const reviewGeminiEl = document.getElementById("review-gemini");
-    const reviewDeepseekEl = document.getElementById("review-deepseek");
+    const reviewTitleEls = [
+      document.getElementById("review-title-1"),
+      document.getElementById("review-title-2"),
+      document.getElementById("review-title-3")
+    ];
+    const reviewEls = [
+      document.getElementById("review-1"),
+      document.getElementById("review-2"),
+      document.getElementById("review-3")
+    ];
+
+    const displayNames = {
+      openai: "OpenAI",
+      anthropic: "Claude",
+      gemini: "Gemini",
+      deepseek: "DeepSeek"
+    };
 
     function applyModeDefaults() {
       const mode = modeEl.value;
@@ -232,54 +245,84 @@
       if (mode === "one_shot") {
         schemaEl.value = BASIC_SCHEMA;
         includeDebug = false;
-
         schemaHintEl.innerHTML = `Auto schema: <code class="inline">basic</code>. Debug is <strong>OFF</strong>.`;
         modeInfoEl.innerHTML = `
           <div class="mode-title">One-shot baseline</div>
           <div class="tiny muted">
-            This is your original baseline setup (single call, abstract-only, basic schema).
-            Use this for consistent comparison tests.
+            Original baseline behavior (single call, abstract-only, basic schema).
           </div>
         `;
       } else {
         schemaEl.value = CONTEXTUAL_SCHEMA;
         includeDebug = true;
-
         schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code>. Debug is <strong>ON</strong>.`;
         modeInfoEl.innerHTML = `
           <div class="mode-title">Two-shot mode</div>
           <div class="tiny muted">
-            Extracts candidate claims, then verifies/repairs them with a second pass.
-            Returns richer JSON with qualifiers/conditions/values when available.
+            Extracts candidate claims, then verifies/repairs them. Richer contextual output.
           </div>
         `;
       }
     }
 
     function clearReviews() {
-      reviewAnthropicEl.textContent = "{}";
-      reviewGeminiEl.textContent = "{}";
-      reviewDeepseekEl.textContent = "{}";
+      for (let i = 0; i < 3; i++) {
+        reviewTitleEls[i].textContent = `Reviewer ${i + 1}`;
+        reviewEls[i].textContent = "{}";
+      }
+    }
+
+    function getDynamicReviewers(selectedProvider) {
+      const all = ["openai", "anthropic", "gemini", "deepseek"];
+      return all.filter(p => p !== selectedProvider);
     }
 
     function prettyReviewBlock(obj) {
       if (!obj) return "{}";
-      if (!obj.ok) return JSON.stringify(obj, null, 2);
+
+      if (!obj.ok) {
+        return [
+          "Error",
+          "-----",
+          obj.error || "Unknown error",
+          "",
+          obj.raw ? "Raw response:\n" + obj.raw : ""
+        ].join("\n");
+      }
 
       const r = obj.review || {};
-      return JSON.stringify({
-        model: obj.model,
-        correct_observations_count: r.correct_observations_count,
-        incorrect_observations_count: r.incorrect_observations_count,
-        correct_observations: r.correct_observations,
-        incorrect_observations: r.incorrect_observations,
-        missing_observations: r.missing_observations,
-        additional_notes: r.additional_notes
-      }, null, 2);
-    }
+      const incorrect = Array.isArray(r.incorrect_properties) ? r.incorrect_properties : [];
+      const additions = Array.isArray(r.additional_properties_json) ? r.additional_properties_json : [];
+      const notes = Array.isArray(r.additional_notes) ? r.additional_notes : [];
 
-    applyModeDefaults();
-    modeEl.addEventListener("change", applyModeDefaults);
+      const lines = [];
+      lines.push(`Model: ${obj.model}`);
+      lines.push(`Correct outputs: ${r.correct_observations_count ?? 0}`);
+      lines.push(`Incorrect outputs: ${r.incorrect_observations_count ?? incorrect.length}`);
+
+      lines.push("");
+      lines.push("Incorrect properties");
+      lines.push("--------------------");
+      if (!incorrect.length) {
+        lines.push("- None");
+      } else {
+        for (const x of incorrect) lines.push(`- ${x}`);
+      }
+
+      lines.push("");
+      lines.push("Additional properties (JSON)");
+      lines.push("--------------------------");
+      lines.push(JSON.stringify(additions, null, 2));
+
+      if (notes.length) {
+        lines.push("");
+        lines.push("Notes");
+        lines.push("-----");
+        for (const x of notes) lines.push(`- ${x}`);
+      }
+
+      return lines.join("\n");
+    }
 
     async function pdfToText(file) {
       const arrayBuffer = await file.arrayBuffer();
@@ -304,12 +347,9 @@
       const lower = t.toLowerCase();
 
       const absIdx = lower.search(/\babstract\b/);
-      if (absIdx < 0) {
-        return t.slice(0, 4500).trim();
-      }
+      if (absIdx < 0) return t.slice(0, 4500).trim();
 
       const after = t.slice(absIdx);
-
       const endCandidates = [
         /\bkeywords\b/i,
         /\bkey words\b/i,
@@ -324,9 +364,12 @@
         if (m > 20 && (end === -1 || m < end)) end = m;
       }
 
-      const abstractBlock = end > 0 ? after.slice(0, end) : after.slice(0, 5000);
-      return abstractBlock.trim();
+      return (end > 0 ? after.slice(0, end) : after.slice(0, 5000)).trim();
     }
+
+    applyModeDefaults();
+    clearReviews();
+    modeEl.addEventListener("change", applyModeDefaults);
 
     document.getElementById("loadBtn").onclick = async () => {
       try {
@@ -355,7 +398,7 @@
 
     document.getElementById("runBtn").onclick = async () => {
       try {
-        if (!pdfText) return alert("Load PDF text first (click 'Load PDF Text').");
+        if (!pdfText) return alert("Load PDF text first.");
         if (!abstractText) return alert("No abstract text available.");
 
         let schema;
@@ -365,10 +408,9 @@
           return alert("Schema is not valid JSON.");
         }
 
-        const provider = document.getElementById("provider").value;
+        const provider = providerEl.value;
         const modelInput = document.getElementById("model").value.trim();
         const mode = modeEl.value;
-
         const instruction = mode === "one_shot" ? ONE_SHOT_INSTRUCTION : TWO_SHOT_INSTRUCTION;
         const prompt = `DOCUMENT TEXT:\n${abstractText}\n\nTASK:\n${instruction}`;
 
@@ -390,12 +432,6 @@
         });
 
         const data = await r.json();
-
-        if (!r.ok) {
-          outEl.textContent = JSON.stringify(data, null, 2);
-          return;
-        }
-
         outEl.textContent = JSON.stringify(data, null, 2);
       } catch (e) {
         console.error(e);
@@ -407,7 +443,7 @@
       try {
         if (!abstractText) return alert("Load a PDF first.");
         if (!outEl.textContent || outEl.textContent.trim() === "{}") {
-          return alert("Run extraction first so there is a JSON output to review.");
+          return alert("Run extraction first.");
         }
 
         let schema;
@@ -417,17 +453,22 @@
           return alert("Schema is not valid JSON.");
         }
 
-        let candidate;
+        let extracted;
         try {
-          const parsed = JSON.parse(outEl.textContent);
-          candidate = parsed.result ?? parsed;
+          extracted = JSON.parse(outEl.textContent);
         } catch {
-          return alert("Current output is not valid JSON. Run extraction again first.");
+          return alert("Current output is not valid JSON.");
         }
 
-        reviewAnthropicEl.textContent = "Reviewing...";
-        reviewGeminiEl.textContent = "Reviewing...";
-        reviewDeepseekEl.textContent = "Reviewing...";
+        const candidate = extracted.result ?? extracted;
+        const selectedProvider = providerEl.value;
+        const reviewers = getDynamicReviewers(selectedProvider);
+
+        for (let i = 0; i < 3; i++) {
+          const rp = reviewers[i];
+          reviewTitleEls[i].textContent = displayNames[rp] || rp;
+          reviewEls[i].textContent = "Reviewing...";
+        }
 
         const r = await fetch(`${API_BASE}/review_json`, {
           method: "POST",
@@ -436,29 +477,26 @@
             source_text: abstractText,
             schema,
             candidate_json: candidate,
-            reviewers: ["anthropic", "gemini", "deepseek"]
+            reviewers
           })
         });
 
         const data = await r.json();
 
         if (!r.ok) {
-          const errText = JSON.stringify(data, null, 2);
-          reviewAnthropicEl.textContent = errText;
-          reviewGeminiEl.textContent = errText;
-          reviewDeepseekEl.textContent = errText;
+          const err = JSON.stringify(data, null, 2);
+          for (let i = 0; i < 3; i++) reviewEls[i].textContent = err;
           return;
         }
 
-        const reviews = data.reviewers || {};
-        reviewAnthropicEl.textContent = prettyReviewBlock(reviews.anthropic);
-        reviewGeminiEl.textContent = prettyReviewBlock(reviews.gemini);
-        reviewDeepseekEl.textContent = prettyReviewBlock(reviews.deepseek);
+        const res = data.reviewers || {};
+        for (let i = 0; i < 3; i++) {
+          const rp = reviewers[i];
+          reviewEls[i].textContent = prettyReviewBlock(res[rp]);
+        }
       } catch (e) {
         const msg = JSON.stringify({ error: String(e?.message || e) }, null, 2);
-        reviewAnthropicEl.textContent = msg;
-        reviewGeminiEl.textContent = msg;
-        reviewDeepseekEl.textContent = msg;
+        for (let i = 0; i < 3; i++) reviewEls[i].textContent = msg;
       }
     };
 
@@ -477,7 +515,7 @@
         await navigator.clipboard.writeText(outEl.textContent || "{}");
         alert("JSON copied to clipboard.");
       } catch {
-        alert("Could not copy. You can select and copy manually.");
+        alert("Could not copy. You can copy manually.");
       }
     };
   </script>
