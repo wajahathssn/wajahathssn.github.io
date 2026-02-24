@@ -14,6 +14,7 @@ function safeJsonParse(text) {
   try {
     return { ok: true, value: JSON.parse(t) };
   } catch {}
+
   const match = t.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
   if (match) {
     try {
@@ -29,7 +30,10 @@ async function callOpenAI({ model, system, user }) {
 
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json"
+    },
     body: JSON.stringify({
       model,
       temperature: 0,
@@ -52,7 +56,10 @@ async function callDeepSeek({ model, system, user }) {
 
   const r = await fetch("https://api.deepseek.com/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json"
+    },
     body: JSON.stringify({
       model,
       temperature: 0,
@@ -82,7 +89,7 @@ async function callAnthropic({ model, system, user }) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 2000,
+      max_tokens: 3000,
       temperature: 0,
       system,
       messages: [{ role: "user", content: user }]
@@ -92,7 +99,7 @@ async function callAnthropic({ model, system, user }) {
   const text = await r.text();
   if (!r.ok) throw new Error(`Anthropic error: ${r.status} ${text}`);
   const data = JSON.parse(text);
-  return data.content?.map(b => b.text).join("") ?? "";
+  return data.content?.map((b) => b.text).join("") ?? "";
 }
 
 async function callGemini({ model, system, user }) {
@@ -105,10 +112,12 @@ async function callGemini({ model, system, user }) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      contents: [{
-        role: "user",
-        parts: [{ text: `${system}\n\n${user}` }]
-      }],
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: `${system}\n\n${user}` }]
+        }
+      ],
       generationConfig: { temperature: 0 }
     })
   });
@@ -116,7 +125,7 @@ async function callGemini({ model, system, user }) {
   const text = await r.text();
   if (!r.ok) throw new Error(`Gemini error: ${r.status} ${text}`);
   const data = JSON.parse(text);
-  return data.candidates?.[0]?.content?.parts?.map(p => p.text).join("") ?? "";
+  return data.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") ?? "";
 }
 
 async function callProvider({ provider, model, system, user }) {
@@ -134,30 +143,108 @@ async function callProvider({ provider, model, system, user }) {
   }
 }
 
-function buildExtractSystemPrompt() {
+function defaultModelFor(provider) {
+  return (
+    provider === "openai" ? "gpt-4o" :
+    provider === "anthropic" ? "claude-sonnet-4-5-20250929" :
+    provider === "gemini" ? "gemini-3-pro-preview" :
+    provider === "deepseek" ? "deepseek-chat" :
+    "gpt-4o"
+  );
+}
+
+function verifierModelFor(provider, selectedModel) {
+  // Force stronger verifier for OpenAI in two-shot mode
+  if (provider === "openai") return "gpt-4o";
+  return selectedModel;
+}
+
+function extractSystemPromptOneShot() {
   return [
-    "You are a strict information extraction engine.",
+    "You are a strict scientific information extraction engine.",
     "Return ONLY valid JSON. No markdown. No extra text.",
     "The JSON MUST validate against the provided JSON Schema.",
-    "If something is not present in the input, use empty arrays/strings; do NOT guess.",
-    "Never include explanations."
+    "Extract only claims explicitly supported by the source text.",
+    "Do not guess or infer missing facts.",
+    "Use faithful evidence snippets from the source text."
   ].join(" ");
 }
 
-function buildVerifySystemPrompt() {
+function extractSystemPromptTwoShotPass1() {
   return [
-    "You are a strict JSON verification and repair engine for information extraction.",
-    "You will receive source text, a candidate JSON extraction, and a JSON Schema.",
-    "Return ONLY valid JSON that matches the schema.",
-    "Remove unsupported claims/properties.",
-    "Fix obvious misattributions only if directly supported by the source text.",
-    "Do not invent new facts.",
-    "Do not include explanations."
+    "You are a high-recall scientific extraction engine.",
+    "Return ONLY valid JSON matching the provided JSON Schema.",
+    "Extract candidate claims from the source text.",
+    "Prefer recall over precision in this pass, but do not invent facts.",
+    "Use faithful evidence snippets.",
+    "No markdown. No explanations."
   ].join(" ");
+}
+
+function rulesSystemPromptTwoShot() {
+  return [
+    "You are a scientific information extraction QA planner.",
+    "You will receive source text, task instructions, and a JSON Schema.",
+    "Your job is to generate PAPER-SPECIFIC verification rules for auditing an extraction.",
+    "Return ONLY valid JSON. No markdown. No explanations.",
+    "The rules must be derived from the source text and task, not generic boilerplate.",
+    "Focus on likely entity confusions, claim types, and context/qualifier requirements in this paper."
+  ].join(" ");
+}
+
+function verifySystemPromptTwoShot() {
+  return [
+    "You are a strict scientific information extraction verifier and repair engine.",
+    "You will receive source text, a candidate JSON extraction, a JSON Schema, and a paper-specific verification plan.",
+    "Return ONLY valid JSON that matches the schema. No markdown. No explanations.",
+    "Apply the paper-specific verification plan strictly.",
+    "Keep only claims explicitly supported by the source text.",
+    "Do not infer or generalize.",
+    "Ensure evidence faithfully supports each claim/property.",
+    "Remove unsupported or misattributed claims.",
+    "If an item has no valid supported claims left, remove it.",
+    "Preserve qualifiers/conditions when present in the source text."
+  ].join(" ");
+}
+
+function getRulePlanSchema() {
+  return {
+    type: "object",
+    properties: {
+      entities: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            role: { type: "string" }
+          },
+          required: ["name", "role"]
+        }
+      },
+      claim_types: {
+        type: "array",
+        items: { type: "string" }
+      },
+      paper_specific_rules: {
+        type: "array",
+        items: { type: "string" }
+      },
+      common_failure_modes: {
+        type: "array",
+        items: { type: "string" }
+      },
+      qualifier_expectations: {
+        type: "array",
+        items: { type: "string" }
+      }
+    },
+    required: ["paper_specific_rules"]
+  };
 }
 
 async function runOneShot({ provider, model, prompt, schema, validate }) {
-  const system = buildExtractSystemPrompt();
+  const system = extractSystemPromptOneShot();
   const user = JSON.stringify({ prompt, schema });
 
   let lastRaw = "";
@@ -169,7 +256,7 @@ async function runOneShot({ provider, model, prompt, schema, validate }) {
     if (!parsed.ok) continue;
 
     if (validate(parsed.value)) {
-      return { ok: true, result: parsed.value, raw: raw };
+      return { ok: true, result: parsed.value };
     }
   }
 
@@ -181,15 +268,20 @@ async function runOneShot({ provider, model, prompt, schema, validate }) {
 }
 
 async function runTwoShot({ provider, model, prompt, schema, validate }) {
-  // Pass 1: extract candidate JSON
-  const extractSystem = buildExtractSystemPrompt();
-  const extractUser = JSON.stringify({ prompt, schema });
+  // PASS 1: candidate extraction
+  const pass1System = extractSystemPromptTwoShotPass1();
+  const pass1User = JSON.stringify({ prompt, schema });
 
   let pass1Raw = "";
   let pass1Parsed = null;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const raw = await callProvider({ provider, model, system: extractSystem, user: extractUser });
+    const raw = await callProvider({
+      provider,
+      model,
+      system: pass1System,
+      user: pass1User
+    });
     pass1Raw = raw;
 
     const parsed = safeJsonParse(raw);
@@ -207,17 +299,68 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
     };
   }
 
-  // Pass 2: verify + repair candidate JSON
-  const verifySystem = buildVerifySystemPrompt();
+  // PASS 2A: generate PAPER-SPECIFIC verification plan
+  const rulePlanSchema = getRulePlanSchema();
+  const rulePlanValidate = ajv.compile(rulePlanSchema);
+
+  const rulesSystem = rulesSystemPromptTwoShot();
+  const rulesUser = JSON.stringify({
+    source_text: prompt,
+    extraction_schema: schema,
+    task: "Create a paper-specific verification plan for auditing a scientific JSON extraction."
+  });
+
+  let rulesRaw = "";
+  let rulesPlan = null;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const raw = await callProvider({
+      provider,
+      model,
+      system: rulesSystem,
+      user: rulesUser
+    });
+    rulesRaw = raw;
+
+    const parsed = safeJsonParse(raw);
+    if (!parsed.ok) continue;
+
+    if (rulePlanValidate(parsed.value)) {
+      rulesPlan = parsed.value;
+      break;
+    }
+  }
+
+  if (!rulesPlan) {
+    rulesPlan = {
+      paper_specific_rules: [
+        "Keep only explicitly supported claims.",
+        "Remove unsupported properties/claims.",
+        "Ensure evidence supports each claim.",
+        "Preserve qualifiers/conditions if present."
+      ]
+    };
+  }
+
+  // PASS 2B: verify + repair using paper-specific plan
+  const verifySystem = verifySystemPromptTwoShot();
   const verifyUser = JSON.stringify({
     source_text: prompt,
     candidate_json: pass1Parsed,
-    schema
+    schema,
+    verification_plan: rulesPlan
   });
+
+  const pass2Model = verifierModelFor(provider, model);
 
   let pass2Raw = "";
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const raw = await callProvider({ provider, model, system: verifySystem, user: verifyUser });
+    const raw = await callProvider({
+      provider,
+      model: pass2Model,
+      system: verifySystem,
+      user: verifyUser
+    });
     pass2Raw = raw;
 
     const parsed = safeJsonParse(raw);
@@ -227,25 +370,35 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
       return {
         ok: true,
         result: parsed.value,
-        raw: pass2Raw
+        debug: {
+          pass1_model: model,
+          pass2_model: pass2Model,
+          pass1_candidate: pass1Parsed,
+          verification_plan: rulesPlan
+        }
       };
     }
   }
 
-  // Fallback: if pass 2 fails but pass 1 is valid, return pass 1
+  // Fallback to pass1 if valid
   if (validate(pass1Parsed)) {
     return {
       ok: true,
       result: pass1Parsed,
-      raw: pass1Raw,
-      warning: "Two-shot verification failed; returned pass-1 extraction"
+      warning: "Two-shot verification failed; returned pass-1 extraction",
+      debug: {
+        pass1_model: model,
+        pass2_model: pass2Model,
+        pass1_candidate: pass1Parsed,
+        verification_plan: rulesPlan
+      }
     };
   }
 
   return {
     ok: false,
     error: "Two-shot verification output did not validate against schema",
-    raw: pass2Raw || pass1Raw
+    raw: pass2Raw || pass1Raw || rulesRaw
   };
 }
 
@@ -256,27 +409,34 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
 
   try {
-    // Optional endpoint auth
     const required = process.env.API_AUTH_KEY;
     if (required) {
       const got = req.headers["x-api-key"];
-      if (got !== required) return res.status(401).json({ error: "Unauthorized" });
+      if (got !== required) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
     }
 
-    const { prompt, schema, provider, model, mode, retrieval_mode } = req.body || {};
-    if (!prompt || typeof prompt !== "string") return res.status(400).json({ error: "Missing prompt string" });
-    if (!schema || typeof schema !== "object") return res.status(400).json({ error: "Missing schema object" });
+    const {
+      prompt,
+      schema,
+      provider,
+      model,
+      mode,
+      retrieval_mode,
+      include_debug
+    } = req.body || {};
+
+    if (!prompt || typeof prompt !== "string") {
+      return res.status(400).json({ error: "Missing prompt string" });
+    }
+
+    if (!schema || typeof schema !== "object") {
+      return res.status(400).json({ error: "Missing schema object" });
+    }
 
     const p = provider || "openai";
-
-    const defaultModel =
-      p === "openai" ? "gpt-4o-mini" :
-      p === "anthropic" ? "claude-sonnet-4-5-20250929" :
-      p === "gemini" ? "gemini-3-pro-preview" :
-      p === "deepseek" ? "deepseek-chat" :
-      "gpt-4o-mini";
-
-    const m = model || defaultModel;
+    const m = model || defaultModelFor(p);
     const extractionMode = mode || "one_shot";
     const retrievalMode = retrieval_mode || "full_text";
 
@@ -299,7 +459,7 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(200).json({
+    const response = {
       ok: true,
       provider: p,
       model: m,
@@ -307,8 +467,13 @@ export default async function handler(req, res) {
       retrieval_mode: retrievalMode,
       warning: runResult.warning,
       result: runResult.result
-    });
+    };
 
+    if (include_debug === true && runResult.debug) {
+      response.debug = runResult.debug;
+    }
+
+    return res.status(200).json(response);
   } catch (err) {
     return res.status(500).json({ error: String(err?.message || err) });
   }
