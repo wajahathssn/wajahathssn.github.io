@@ -373,7 +373,6 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
         debug: {
           pass1_model: model,
           pass2_model: pass2Model,
-          pass1_candidate: pass1Parsed,
           verification_plan: rulesPlan
         }
       };
@@ -389,7 +388,6 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
       debug: {
         pass1_model: model,
         pass2_model: pass2Model,
-        pass1_candidate: pass1Parsed,
         verification_plan: rulesPlan
       }
     };
