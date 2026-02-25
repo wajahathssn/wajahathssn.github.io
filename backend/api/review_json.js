@@ -12,20 +12,21 @@ function setCors(res) {
 function safeJsonParse(text) {
   const t = (text || "").trim();
 
+  // direct parse
   try {
     return { ok: true, value: JSON.parse(t) };
   } catch {}
 
-  const noFence = t
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
+  // strip ```json ... ```
+  const fenced = t.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced) {
+    try {
+      return { ok: true, value: JSON.parse(fenced[1]) };
+    } catch {}
+  }
 
-  try {
-    return { ok: true, value: JSON.parse(noFence) };
-  } catch {}
-
-  const match = noFence.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  // fallback: first object/array
+  const match = t.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
   if (match) {
     try {
       return { ok: true, value: JSON.parse(match[1]) };
@@ -33,16 +34,6 @@ function safeJsonParse(text) {
   }
 
   return { ok: false };
-}
-
-function defaultModelFor(provider) {
-  return (
-    provider === "openai" ? "gpt-4o" :
-    provider === "anthropic" ? "claude-sonnet-4-5-20250929" :
-    provider === "gemini" ? "gemini-3-pro-preview" :
-    provider === "deepseek" ? "deepseek-chat" :
-    "gpt-4o"
-  );
 }
 
 async function callOpenAI({ model, system, user }) {
@@ -133,10 +124,12 @@ async function callGemini({ model, system, user }) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      contents: [{
-        role: "user",
-        parts: [{ text: `${system}\n\n${user}` }]
-      }],
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: `${system}\n\n${user}` }]
+        }
+      ],
       generationConfig: { temperature: 0 }
     })
   });
@@ -162,11 +155,21 @@ async function callProvider({ provider, model, system, user }) {
   }
 }
 
-function reviewSchema() {
+function defaultModelFor(provider) {
+  return (
+    provider === "openai" ? "gpt-4o" :
+    provider === "anthropic" ? "claude-sonnet-4-5-20250929" :
+    provider === "gemini" ? "gemini-3-pro-preview" :
+    provider === "deepseek" ? "deepseek-chat" :
+    "gpt-4o"
+  );
+}
+
+// Review schema used by UI cards
+function getReviewSchema() {
   return {
     type: "object",
     properties: {
-      reviewer_summary: { type: "string" },
       correct_count: { type: "integer" },
       incorrect_count: { type: "integer" },
       missing_properties_json: {
@@ -175,15 +178,16 @@ function reviewSchema() {
           type: "object",
           properties: {
             material: { type: "string" },
-            property: { type: "string" },
-            value: { type: "string" },
-            unit: { type: "string" },
-            qualifier: { type: "string" },
-            conditions: { type: "string" },
-            evidence: { type: "string" },
-            note: { type: "string" }
+            properties: {
+              type: "array",
+              items: { type: "string" }
+            },
+            evidence: {
+              type: "array",
+              items: { type: "string" }
+            }
           },
-          required: ["material", "property"]
+          required: ["material", "properties"]
         }
       },
       notes: {
@@ -191,170 +195,137 @@ function reviewSchema() {
         items: { type: "string" }
       }
     },
-    required: ["correct_count", "incorrect_count", "missing_properties_json"]
+    required: ["correct_count", "incorrect_count", "missing_properties_json", "notes"]
   };
+}
+
+// Normalize whatever the reviewer returned into your UI schema
+function normalizeReview(value) {
+  const out = {
+    correct_count: 0,
+    incorrect_count: 0,
+    missing_properties_json: [],
+    notes: []
+  };
+
+  if (!value || typeof value !== "object") return out;
+
+  // counts
+  if (Number.isInteger(value.correct_count)) out.correct_count = value.correct_count;
+  if (Number.isInteger(value.incorrect_count)) out.incorrect_count = value.incorrect_count;
+
+  // sometimes models nest counts
+  if (value.audit_summary && typeof value.audit_summary === "object") {
+    if (Number.isInteger(value.audit_summary.correct_observations)) {
+      out.correct_count = value.audit_summary.correct_observations;
+    }
+    if (Number.isInteger(value.audit_summary.incorrect_observations)) {
+      out.incorrect_count = value.audit_summary.incorrect_observations;
+    }
+  }
+
+  // missing properties (preferred)
+  if (Array.isArray(value.missing_properties_json)) {
+    out.missing_properties_json = value.missing_properties_json;
+  }
+
+  // alternate nested shape
+  if (
+    (!out.missing_properties_json || out.missing_properties_json.length === 0) &&
+    value.detailed_audit &&
+    Array.isArray(value.detailed_audit.missing_items)
+  ) {
+    out.missing_properties_json = value.detailed_audit.missing_items.map((x) => ({
+      material: String(x?.material ?? ""),
+      properties: Array.isArray(x?.properties) ? x.properties.map(String) : [],
+      evidence: Array.isArray(x?.evidence) ? x.evidence.map(String) : []
+    }));
+  }
+
+  // notes can come back as string or array
+  if (Array.isArray(value.notes)) {
+    out.notes = value.notes.map(String);
+  } else if (typeof value.notes === "string" && value.notes.trim()) {
+    out.notes = [value.notes.trim()];
+  }
+
+  if (typeof value.reviewer_summary === "string" && value.reviewer_summary.trim()) {
+    out.notes.unshift(value.reviewer_summary.trim());
+  }
+
+  if (Array.isArray(value.validation_notes)) {
+    out.notes.push(...value.validation_notes.map(String));
+  }
+
+  // sanitize missing items
+  out.missing_properties_json = (out.missing_properties_json || [])
+    .filter((x) => x && typeof x === "object")
+    .map((x) => ({
+      material: String(x.material ?? ""),
+      properties: Array.isArray(x.properties) ? x.properties.map(String) : [],
+      evidence: Array.isArray(x.evidence) ? x.evidence.map(String) : []
+    }))
+    .filter((x) => x.material || x.properties.length > 0);
+
+  return out;
 }
 
 function reviewSystemPrompt() {
   return [
-    "You are a scientific extraction reviewer.",
-    "You will be given source text, a target schema, and a candidate extraction JSON.",
-    "Audit the candidate extraction against the source text.",
-    "Return ONLY valid JSON. No markdown. No extra text.",
-    "Use EXACTLY this top-level shape:",
-    "{ reviewer_summary, correct_count, incorrect_count, missing_properties_json, notes }",
-    "",
-    "Rules:",
-    "- correct_count: integer count of correct extracted property observations.",
-    "- incorrect_count: integer count of incorrect extracted property observations.",
-    "- missing_properties_json: array of missing properties that should be added, as structured JSON objects.",
-    "- notes: optional short notes.",
-    "- Be strict and evidence-grounded.",
-    "- Do not invent claims not supported by the source text."
+    "You are a strict scientific extraction reviewer.",
+    "You will review a candidate JSON extraction against the source text.",
+    "Return ONLY valid JSON (no markdown, no code fences, no prose outside JSON).",
+    "Do NOT rewrite the candidate extraction.",
+    "Your output must contain exactly these top-level fields:",
+    "correct_count (integer), incorrect_count (integer), missing_properties_json (array), notes (array of strings).",
+    "Count an observation as incorrect only if it is unsupported, misattributed, or contradicted by the source text.",
+    "Do not list correct observations individually.",
+    "In missing_properties_json, include only additional supported properties missing from the candidate.",
+    "Each missing item should contain: material, properties (array of strings), and optional evidence (array of strings).",
+    "Keep notes concise."
   ].join(" ");
 }
 
-function normalizeReviewShape(parsed) {
-  // Already in simplified target format
-  if (
-    parsed &&
-    typeof parsed === "object" &&
-    Number.isInteger(parsed.correct_count) &&
-    Number.isInteger(parsed.incorrect_count) &&
-    Array.isArray(parsed.missing_properties_json)
-  ) {
-    return {
-      reviewer_summary: parsed.reviewer_summary || "",
-      correct_count: parsed.correct_count,
-      incorrect_count: parsed.incorrect_count,
-      missing_properties_json: parsed.missing_properties_json,
-      notes: Array.isArray(parsed.notes) ? parsed.notes.map(String) : []
-    };
-  }
-
-  // Previous custom format
-  if (
-    parsed &&
-    typeof parsed === "object" &&
-    Number.isInteger(parsed.correct_observations_count) &&
-    Number.isInteger(parsed.incorrect_observations_count)
-  ) {
-    let missing = [];
-
-    if (Array.isArray(parsed.additional_properties_json)) {
-      missing = parsed.additional_properties_json;
-    } else if (Array.isArray(parsed.missing_observations)) {
-      missing = parsed.missing_observations.map((x) => ({
-        material: "",
-        property: String(x),
-        note: "Mapped from legacy missing format"
-      }));
-    }
-
-    return {
-      reviewer_summary: parsed.reviewer_summary || "",
-      correct_count: parsed.correct_observations_count,
-      incorrect_count: parsed.incorrect_observations_count,
-      missing_properties_json: missing,
-      notes: Array.isArray(parsed.additional_notes)
-        ? parsed.additional_notes.map(String)
-        : []
-    };
-  }
-
-  // Claude nested audit format
-  if (parsed && typeof parsed === "object" && parsed.audit_summary && parsed.detailed_audit) {
-    const correctItems = Array.isArray(parsed.detailed_audit.correct_items)
-      ? parsed.detailed_audit.correct_items
-      : [];
-    const incorrectItems = Array.isArray(parsed.detailed_audit.incorrect_items)
-      ? parsed.detailed_audit.incorrect_items
-      : [];
-    const missingItems = Array.isArray(parsed.detailed_audit.missing_items)
-      ? parsed.detailed_audit.missing_items
-      : [];
-
-    const missing_properties_json = missingItems.flatMap((x) => {
-      const material = x?.material || "";
-      const evidence = Array.isArray(x?.evidence) ? x.evidence.join(" | ") : "";
-      const note = x?.note || "";
-
-      if (Array.isArray(x?.properties) && x.properties.length) {
-        return x.properties.map((p) => ({
-          material,
-          property: String(p),
-          evidence,
-          note
-        }));
-      }
-
-      return [{
-        material,
-        property: x?.property ? String(x.property) : "Unspecified missing property",
-        evidence,
-        note
-      }];
-    });
-
-    return {
-      reviewer_summary: "",
-      correct_count: Number.isInteger(parsed.audit_summary?.correct_observations)
-        ? parsed.audit_summary.correct_observations
-        : correctItems.length,
-      incorrect_count: Number.isInteger(parsed.audit_summary?.incorrect_observations)
-        ? parsed.audit_summary.incorrect_observations
-        : incorrectItems.length,
-      missing_properties_json,
-      notes: Array.isArray(parsed.validation_notes)
-        ? parsed.validation_notes.map(String)
-        : []
-    };
-  }
-
-  return null;
-}
-
-async function runReviewer({ reviewerProvider, sourceText, schema, candidateJson }) {
-  const model = defaultModelFor(reviewerProvider);
-  const validate = ajv.compile(reviewSchema());
-
+async function runSingleReview({ provider, model, source_text, schema, candidate_json }) {
   const system = reviewSystemPrompt();
+
   const user = JSON.stringify({
-    source_text: sourceText,
-    target_extraction_schema: schema,
-    candidate_json: candidateJson,
-    task: "Review the candidate extraction and return only counts + missing properties JSON."
+    task: "Review this candidate extraction against the source text.",
+    source_text,
+    extraction_schema: schema,
+    candidate_json,
+    expected_output_format: {
+      correct_count: 0,
+      incorrect_count: 0,
+      missing_properties_json: [
+        {
+          material: "string",
+          properties: ["string"],
+          evidence: ["string"]
+        }
+      ],
+      notes: ["string"]
+    }
   });
 
+  const validate = ajv.compile(getReviewSchema());
+
   let lastRaw = "";
-
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const raw = await callProvider({
-      provider: reviewerProvider,
-      model,
-      system,
-      user
-    });
-
+    const raw = await callProvider({ provider, model, system, user });
     lastRaw = raw;
 
     const parsed = safeJsonParse(raw);
     if (!parsed.ok) continue;
 
-    if (validate(parsed.value)) {
-      return { ok: true, provider: reviewerProvider, model, review: parsed.value };
-    }
-
-    const normalized = normalizeReviewShape(parsed.value);
-    if (normalized && validate(normalized)) {
-      return { ok: true, provider: reviewerProvider, model, review: normalized };
+    const normalized = normalizeReview(parsed.value);
+    if (validate(normalized)) {
+      return { ok: true, review: normalized };
     }
   }
 
   return {
     ok: false,
-    provider: reviewerProvider,
-    model,
     error: "Reviewer output did not validate",
     raw: lastRaw
   };
@@ -384,37 +355,45 @@ export default async function handler(req, res) {
     if (!candidate_json || typeof candidate_json !== "object") {
       return res.status(400).json({ error: "Missing candidate_json object" });
     }
+    if (!Array.isArray(reviewers) || reviewers.length === 0) {
+      return res.status(400).json({ error: "Missing reviewers array" });
+    }
 
-    let requested = Array.isArray(reviewers) && reviewers.length
-      ? reviewers.filter((x) => ["openai", "anthropic", "gemini", "deepseek"].includes(x))
-      : ["anthropic", "gemini", "deepseek"];
+    const allowed = ["openai", "anthropic", "gemini", "deepseek"];
+    const finalReviewers = reviewers.filter((r) => allowed.includes(r));
 
-    requested = [...new Set(requested)].slice(0, 3);
-
-    if (!requested.length) {
-      return res.status(400).json({ error: "No valid reviewers provided" });
+    if (!finalReviewers.length) {
+      return res.status(400).json({ error: "No valid reviewers" });
     }
 
     const results = {};
-    for (const rp of requested) {
+    for (const provider of finalReviewers) {
+      const model = defaultModelFor(provider);
       try {
-        results[rp] = await runReviewer({
-          reviewerProvider: rp,
-          sourceText: source_text,
+        results[provider] = await runSingleReview({
+          provider,
+          model,
+          source_text,
           schema,
-          candidateJson: candidate_json
+          candidate_json
         });
+        // include provider/model for UI display
+        results[provider].provider = provider;
+        results[provider].model = model;
       } catch (err) {
-        results[rp] = {
+        results[provider] = {
           ok: false,
-          provider: rp,
-          model: defaultModelFor(rp),
+          provider,
+          model,
           error: String(err?.message || err)
         };
       }
     }
 
-    return res.status(200).json({ ok: true, reviewers: results });
+    return res.status(200).json({
+      ok: true,
+      reviewers: results
+    });
   } catch (err) {
     return res.status(500).json({ error: String(err?.message || err) });
   }
