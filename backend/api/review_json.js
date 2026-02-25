@@ -11,11 +11,11 @@ function setCors(res) {
 
 function safeJsonParse(text) {
   const t = (text || "").trim();
+
   try {
     return { ok: true, value: JSON.parse(t) };
   } catch {}
 
-  // Strip code fences if present
   const noFence = t
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/i, "")
@@ -31,6 +31,7 @@ function safeJsonParse(text) {
       return { ok: true, value: JSON.parse(match[1]) };
     } catch {}
   }
+
   return { ok: false };
 }
 
@@ -166,16 +167,9 @@ function reviewSchema() {
     type: "object",
     properties: {
       reviewer_summary: { type: "string" },
-
-      correct_observations_count: { type: "integer" },
-      incorrect_observations_count: { type: "integer" },
-
-      incorrect_properties: {
-        type: "array",
-        items: { type: "string" }
-      },
-
-      additional_properties_json: {
+      correct_count: { type: "integer" },
+      incorrect_count: { type: "integer" },
+      missing_properties_json: {
         type: "array",
         items: {
           type: "object",
@@ -192,18 +186,12 @@ function reviewSchema() {
           required: ["material", "property"]
         }
       },
-
-      additional_notes: {
+      notes: {
         type: "array",
         items: { type: "string" }
       }
     },
-    required: [
-      "correct_observations_count",
-      "incorrect_observations_count",
-      "incorrect_properties",
-      "additional_properties_json"
-    ]
+    required: ["correct_count", "incorrect_count", "missing_properties_json"]
   };
 }
 
@@ -214,92 +202,79 @@ function reviewSystemPrompt() {
     "Audit the candidate extraction against the source text.",
     "Return ONLY valid JSON. No markdown. No extra text.",
     "Use EXACTLY this top-level shape:",
-    "{ reviewer_summary, correct_observations_count, incorrect_observations_count, incorrect_properties, additional_properties_json, additional_notes }",
-    "Field rules:",
-    "- correct_observations_count: integer count of correct extracted property observations.",
-    "- incorrect_observations_count: integer count of incorrect extracted property observations.",
-    "- incorrect_properties: array of short strings, each describing ONE incorrect property only.",
-    "- additional_properties_json: array of missing properties that should be added, as structured objects.",
-    "- additional_notes: optional array of short notes.",
-    "Be strict and evidence-grounded. Do not invent claims not supported by the source text."
+    "{ reviewer_summary, correct_count, incorrect_count, missing_properties_json, notes }",
+    "",
+    "Rules:",
+    "- correct_count: integer count of correct extracted property observations.",
+    "- incorrect_count: integer count of incorrect extracted property observations.",
+    "- missing_properties_json: array of missing properties that should be added, as structured JSON objects.",
+    "- notes: optional short notes.",
+    "- Be strict and evidence-grounded.",
+    "- Do not invent claims not supported by the source text."
   ].join(" ");
 }
 
 function normalizeReviewShape(parsed) {
-  // New target format
+  // Already in simplified target format
   if (
     parsed &&
     typeof parsed === "object" &&
-    Array.isArray(parsed.incorrect_properties) &&
-    Array.isArray(parsed.additional_properties_json)
+    Number.isInteger(parsed.correct_count) &&
+    Number.isInteger(parsed.incorrect_count) &&
+    Array.isArray(parsed.missing_properties_json)
   ) {
     return {
       reviewer_summary: parsed.reviewer_summary || "",
-      correct_observations_count: Number.isInteger(parsed.correct_observations_count)
-        ? parsed.correct_observations_count
-        : 0,
-      incorrect_observations_count: Number.isInteger(parsed.incorrect_observations_count)
-        ? parsed.incorrect_observations_count
-        : parsed.incorrect_properties.length,
-      incorrect_properties: parsed.incorrect_properties.map(String),
-      additional_properties_json: Array.isArray(parsed.additional_properties_json)
-        ? parsed.additional_properties_json
-        : [],
-      additional_notes: Array.isArray(parsed.additional_notes)
-        ? parsed.additional_notes.map(String)
-        : []
+      correct_count: parsed.correct_count,
+      incorrect_count: parsed.incorrect_count,
+      missing_properties_json: parsed.missing_properties_json,
+      notes: Array.isArray(parsed.notes) ? parsed.notes.map(String) : []
     };
   }
 
-  // Legacy normalized format
+  // Previous custom format
   if (
     parsed &&
     typeof parsed === "object" &&
-    Array.isArray(parsed.correct_observations) &&
-    Array.isArray(parsed.incorrect_observations) &&
-    Array.isArray(parsed.missing_observations)
+    Number.isInteger(parsed.correct_observations_count) &&
+    Number.isInteger(parsed.incorrect_observations_count)
   ) {
-    return {
-      reviewer_summary: parsed.reviewer_summary || "",
-      correct_observations_count: Number.isInteger(parsed.correct_observations_count)
-        ? parsed.correct_observations_count
-        : parsed.correct_observations.length,
-      incorrect_observations_count: Number.isInteger(parsed.incorrect_observations_count)
-        ? parsed.incorrect_observations_count
-        : parsed.incorrect_observations.length,
-      incorrect_properties: parsed.incorrect_observations.map(String),
-      additional_properties_json: parsed.missing_observations.map((x) => ({
+    let missing = [];
+
+    if (Array.isArray(parsed.additional_properties_json)) {
+      missing = parsed.additional_properties_json;
+    } else if (Array.isArray(parsed.missing_observations)) {
+      missing = parsed.missing_observations.map((x) => ({
         material: "",
         property: String(x),
-        note: "Mapped from legacy missing_observations format"
-      })),
-      additional_notes: Array.isArray(parsed.additional_notes)
+        note: "Mapped from legacy missing format"
+      }));
+    }
+
+    return {
+      reviewer_summary: parsed.reviewer_summary || "",
+      correct_count: parsed.correct_observations_count,
+      incorrect_count: parsed.incorrect_observations_count,
+      missing_properties_json: missing,
+      notes: Array.isArray(parsed.additional_notes)
         ? parsed.additional_notes.map(String)
         : []
     };
   }
 
   // Claude nested audit format
-  if (
-    parsed &&
-    typeof parsed === "object" &&
-    parsed.audit_summary &&
-    parsed.detailed_audit
-  ) {
-    const correctItems = Array.isArray(parsed.detailed_audit.correct_items) ? parsed.detailed_audit.correct_items : [];
-    const incorrectItems = Array.isArray(parsed.detailed_audit.incorrect_items) ? parsed.detailed_audit.incorrect_items : [];
-    const missingItems = Array.isArray(parsed.detailed_audit.missing_items) ? parsed.detailed_audit.missing_items : [];
+  if (parsed && typeof parsed === "object" && parsed.audit_summary && parsed.detailed_audit) {
+    const correctItems = Array.isArray(parsed.detailed_audit.correct_items)
+      ? parsed.detailed_audit.correct_items
+      : [];
+    const incorrectItems = Array.isArray(parsed.detailed_audit.incorrect_items)
+      ? parsed.detailed_audit.incorrect_items
+      : [];
+    const missingItems = Array.isArray(parsed.detailed_audit.missing_items)
+      ? parsed.detailed_audit.missing_items
+      : [];
 
-    const incorrect_properties = incorrectItems.map((x) => {
-      const material = x?.material ? `Material=${x.material}` : "Material=Unknown";
-      const prop = Array.isArray(x?.properties) && x.properties.length
-        ? `Property=${x.properties.join("; ")}`
-        : (x?.property ? `Property=${x.property}` : "Property=Unknown");
-      const reason = x?.note ? `Reason=${x.note}` : "Reason=Incorrect or unsupported";
-      return `${material} | ${prop} | ${reason}`;
-    });
-
-    const additional_properties_json = missingItems.flatMap((x) => {
+    const missing_properties_json = missingItems.flatMap((x) => {
       const material = x?.material || "";
       const evidence = Array.isArray(x?.evidence) ? x.evidence.join(" | ") : "";
       const note = x?.note || "";
@@ -323,15 +298,14 @@ function normalizeReviewShape(parsed) {
 
     return {
       reviewer_summary: "",
-      correct_observations_count: Number.isInteger(parsed.audit_summary?.correct_observations)
+      correct_count: Number.isInteger(parsed.audit_summary?.correct_observations)
         ? parsed.audit_summary.correct_observations
         : correctItems.length,
-      incorrect_observations_count: Number.isInteger(parsed.audit_summary?.incorrect_observations)
+      incorrect_count: Number.isInteger(parsed.audit_summary?.incorrect_observations)
         ? parsed.audit_summary.incorrect_observations
-        : incorrect_properties.length,
-      incorrect_properties,
-      additional_properties_json,
-      additional_notes: Array.isArray(parsed.validation_notes)
+        : incorrectItems.length,
+      missing_properties_json,
+      notes: Array.isArray(parsed.validation_notes)
         ? parsed.validation_notes.map(String)
         : []
     };
@@ -349,7 +323,7 @@ async function runReviewer({ reviewerProvider, sourceText, schema, candidateJson
     source_text: sourceText,
     target_extraction_schema: schema,
     candidate_json: candidateJson,
-    task: "Review the candidate extraction and report incorrect properties and missing/additional properties."
+    task: "Review the candidate extraction and return only counts + missing properties JSON."
   });
 
   let lastRaw = "";
@@ -361,6 +335,7 @@ async function runReviewer({ reviewerProvider, sourceText, schema, candidateJson
       system,
       user
     });
+
     lastRaw = raw;
 
     const parsed = safeJsonParse(raw);
@@ -392,7 +367,6 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
 
   try {
-    // Optional endpoint auth
     const required = process.env.API_AUTH_KEY;
     if (required) {
       const got = req.headers["x-api-key"];
@@ -415,7 +389,6 @@ export default async function handler(req, res) {
       ? reviewers.filter((x) => ["openai", "anthropic", "gemini", "deepseek"].includes(x))
       : ["anthropic", "gemini", "deepseek"];
 
-    // de-dup
     requested = [...new Set(requested)].slice(0, 3);
 
     if (!requested.length) {
@@ -441,10 +414,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({
-      ok: true,
-      reviewers: results
-    });
+    return res.status(200).json({ ok: true, reviewers: results });
   } catch (err) {
     return res.status(500).json({ error: String(err?.message || err) });
   }
