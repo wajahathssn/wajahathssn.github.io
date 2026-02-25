@@ -277,52 +277,47 @@
       return all.filter(p => p !== selectedProvider);
     }
 
-    function prettyReviewBlock(obj) {
-      if (!obj) return "{}";
+function prettyReviewBlock(obj) {
+  if (!obj) return "{}";
 
-      if (!obj.ok) {
-        return [
-          "Error",
-          "-----",
-          obj.error || "Unknown error",
-          "",
-          obj.raw ? "Raw response:\n" + obj.raw : ""
-        ].join("\n");
-      }
+  if (!obj.ok) {
+    return [
+      "Error",
+      "-----",
+      obj.error || "Unknown error",
+      "",
+      obj.raw ? "Raw response:\n" + obj.raw : ""
+    ].join("\n");
+  }
 
-      const r = obj.review || {};
-      const incorrect = Array.isArray(r.incorrect_properties) ? r.incorrect_properties : [];
-      const additions = Array.isArray(r.additional_properties_json) ? r.additional_properties_json : [];
-      const notes = Array.isArray(r.additional_notes) ? r.additional_notes : [];
+  const r = obj.review || {};
+  const missing = Array.isArray(r.missing_properties_json) ? r.missing_properties_json : [];
+  const notes = Array.isArray(r.notes) ? r.notes : [];
 
-      const lines = [];
-      lines.push(`Model: ${obj.model}`);
-      lines.push(`Correct outputs: ${r.correct_observations_count ?? 0}`);
-      lines.push(`Incorrect outputs: ${r.incorrect_observations_count ?? incorrect.length}`);
+  const lines = [];
+  lines.push(`Model: ${obj.model}`);
+  lines.push("");
+  lines.push("Correct");
+  lines.push("-------");
+  lines.push(String(r.correct_count ?? 0));
+  lines.push("");
+  lines.push("Incorrect");
+  lines.push("---------");
+  lines.push(String(r.incorrect_count ?? 0));
+  lines.push("");
+  lines.push("Missing properties (JSON)");
+  lines.push("-----------------------");
+  lines.push(JSON.stringify(missing, null, 2));
 
-      lines.push("");
-      lines.push("Incorrect properties");
-      lines.push("--------------------");
-      if (!incorrect.length) {
-        lines.push("- None");
-      } else {
-        for (const x of incorrect) lines.push(`- ${x}`);
-      }
+  if (notes.length) {
+    lines.push("");
+    lines.push("Notes");
+    lines.push("-----");
+    for (const n of notes) lines.push(`- ${n}`);
+  }
 
-      lines.push("");
-      lines.push("Additional properties (JSON)");
-      lines.push("--------------------------");
-      lines.push(JSON.stringify(additions, null, 2));
-
-      if (notes.length) {
-        lines.push("");
-        lines.push("Notes");
-        lines.push("-----");
-        for (const x of notes) lines.push(`- ${x}`);
-      }
-
-      return lines.join("\n");
-    }
+  return lines.join("\n");
+}
 
     async function pdfToText(file) {
       const arrayBuffer = await file.arrayBuffer();
