@@ -32,6 +32,7 @@
       border-radius: 6px;
       font-size: 12px;
     }
+
     .review-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(260px, 1fr));
@@ -40,9 +41,60 @@
     @media (max-width: 900px) {
       .review-grid { grid-template-columns: 1fr; }
     }
+
+    .review-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+    }
     .review-card h4 {
       margin: 0 0 8px 0;
       font-size: 14px;
+    }
+
+    .review-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .stat-box {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 8px;
+      background: #f8fafc;
+      text-align: center;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 4px;
+    }
+
+    .stat-value {
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+
+    .review-block {
+      margin-top: 8px;
+    }
+
+    .notes-list {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .notes-list li {
+      margin: 2px 0;
+    }
+
+    .err {
+      color: #b42318;
+      font-weight: 600;
     }
   </style>
 </head>
@@ -125,18 +177,96 @@
   <div class="card">
     <h3>Cross-Model Review</h3>
     <p class="tiny muted">Runs review against the current extraction JSON using the other 3 providers (excluding the one you used for extraction).</p>
+
     <div class="review-grid">
       <div class="review-card">
         <h4 id="review-title-1">Reviewer 1</h4>
-        <pre id="review-1">{}</pre>
+
+        <div class="review-stats">
+          <div class="stat-box">
+            <div class="stat-label">Correct</div>
+            <div class="stat-value" id="review-1-correct">-</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Incorrect</div>
+            <div class="stat-value" id="review-1-incorrect">-</div>
+          </div>
+        </div>
+
+        <div class="review-block">
+          <div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div>
+          <pre id="review-1-missing">[]</pre>
+        </div>
+
+        <div class="review-block">
+          <div class="tiny muted" style="margin-bottom:6px;">Notes</div>
+          <div id="review-1-notes" class="tiny muted">None</div>
+        </div>
+
+        <details style="margin-top:8px;">
+          <summary><small>Raw / error output</small></summary>
+          <pre id="review-1-raw"></pre>
+        </details>
       </div>
+
       <div class="review-card">
         <h4 id="review-title-2">Reviewer 2</h4>
-        <pre id="review-2">{}</pre>
+
+        <div class="review-stats">
+          <div class="stat-box">
+            <div class="stat-label">Correct</div>
+            <div class="stat-value" id="review-2-correct">-</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Incorrect</div>
+            <div class="stat-value" id="review-2-incorrect">-</div>
+          </div>
+        </div>
+
+        <div class="review-block">
+          <div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div>
+          <pre id="review-2-missing">[]</pre>
+        </div>
+
+        <div class="review-block">
+          <div class="tiny muted" style="margin-bottom:6px;">Notes</div>
+          <div id="review-2-notes" class="tiny muted">None</div>
+        </div>
+
+        <details style="margin-top:8px;">
+          <summary><small>Raw / error output</small></summary>
+          <pre id="review-2-raw"></pre>
+        </details>
       </div>
+
       <div class="review-card">
         <h4 id="review-title-3">Reviewer 3</h4>
-        <pre id="review-3">{}</pre>
+
+        <div class="review-stats">
+          <div class="stat-box">
+            <div class="stat-label">Correct</div>
+            <div class="stat-value" id="review-3-correct">-</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Incorrect</div>
+            <div class="stat-value" id="review-3-incorrect">-</div>
+          </div>
+        </div>
+
+        <div class="review-block">
+          <div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div>
+          <pre id="review-3-missing">[]</pre>
+        </div>
+
+        <div class="review-block">
+          <div class="tiny muted" style="margin-bottom:6px;">Notes</div>
+          <div id="review-3-notes" class="tiny muted">None</div>
+        </div>
+
+        <details style="margin-top:8px;">
+          <summary><small>Raw / error output</small></summary>
+          <pre id="review-3-raw"></pre>
+        </details>
       </div>
     </div>
   </div>
@@ -226,10 +356,35 @@
       document.getElementById("review-title-2"),
       document.getElementById("review-title-3")
     ];
-    const reviewEls = [
-      document.getElementById("review-1"),
-      document.getElementById("review-2"),
-      document.getElementById("review-3")
+
+    const reviewCorrectEls = [
+      document.getElementById("review-1-correct"),
+      document.getElementById("review-2-correct"),
+      document.getElementById("review-3-correct")
+    ];
+
+    const reviewIncorrectEls = [
+      document.getElementById("review-1-incorrect"),
+      document.getElementById("review-2-incorrect"),
+      document.getElementById("review-3-incorrect")
+    ];
+
+    const reviewMissingEls = [
+      document.getElementById("review-1-missing"),
+      document.getElementById("review-2-missing"),
+      document.getElementById("review-3-missing")
+    ];
+
+    const reviewNotesEls = [
+      document.getElementById("review-1-notes"),
+      document.getElementById("review-2-notes"),
+      document.getElementById("review-3-notes")
+    ];
+
+    const reviewRawEls = [
+      document.getElementById("review-1-raw"),
+      document.getElementById("review-2-raw"),
+      document.getElementById("review-3-raw")
     ];
 
     const displayNames = {
@@ -268,7 +423,11 @@
     function clearReviews() {
       for (let i = 0; i < 3; i++) {
         reviewTitleEls[i].textContent = `Reviewer ${i + 1}`;
-        reviewEls[i].textContent = "{}";
+        reviewCorrectEls[i].textContent = "-";
+        reviewIncorrectEls[i].textContent = "-";
+        reviewMissingEls[i].textContent = "[]";
+        reviewNotesEls[i].textContent = "None";
+        reviewRawEls[i].textContent = "";
       }
     }
 
@@ -277,47 +436,53 @@
       return all.filter(p => p !== selectedProvider);
     }
 
-function prettyReviewBlock(obj) {
-  if (!obj) return "{}";
+    function renderNotes(el, notes) {
+      if (!Array.isArray(notes) || notes.length === 0) {
+        el.textContent = "None";
+        return;
+      }
+      const ul = document.createElement("ul");
+      ul.className = "notes-list tiny";
+      for (const n of notes) {
+        const li = document.createElement("li");
+        li.textContent = String(n);
+        ul.appendChild(li);
+      }
+      el.innerHTML = "";
+      el.appendChild(ul);
+    }
 
-  if (!obj.ok) {
-    return [
-      "Error",
-      "-----",
-      obj.error || "Unknown error",
-      "",
-      obj.raw ? "Raw response:\n" + obj.raw : ""
-    ].join("\n");
-  }
+    function renderReviewCard(index, obj) {
+      if (!obj) {
+        reviewCorrectEls[index].textContent = "-";
+        reviewIncorrectEls[index].textContent = "-";
+        reviewMissingEls[index].textContent = "[]";
+        reviewNotesEls[index].textContent = "None";
+        reviewRawEls[index].textContent = "";
+        return;
+      }
 
-  const r = obj.review || {};
-  const missing = Array.isArray(r.missing_properties_json) ? r.missing_properties_json : [];
-  const notes = Array.isArray(r.notes) ? r.notes : [];
+      if (!obj.ok) {
+        reviewCorrectEls[index].textContent = "ERR";
+        reviewIncorrectEls[index].textContent = "ERR";
+        reviewMissingEls[index].textContent = "[]";
+        reviewNotesEls[index].innerHTML = `<span class="err">Review failed</span>`;
+        reviewRawEls[index].textContent = JSON.stringify(obj, null, 2);
+        return;
+      }
 
-  const lines = [];
-  lines.push(`Model: ${obj.model}`);
-  lines.push("");
-  lines.push("Correct");
-  lines.push("-------");
-  lines.push(String(r.correct_count ?? 0));
-  lines.push("");
-  lines.push("Incorrect");
-  lines.push("---------");
-  lines.push(String(r.incorrect_count ?? 0));
-  lines.push("");
-  lines.push("Missing properties (JSON)");
-  lines.push("-----------------------");
-  lines.push(JSON.stringify(missing, null, 2));
+      const r = obj.review || {};
+      const missing = Array.isArray(r.missing_properties_json) ? r.missing_properties_json : [];
+      const notes = Array.isArray(r.notes) ? r.notes : [];
 
-  if (notes.length) {
-    lines.push("");
-    lines.push("Notes");
-    lines.push("-----");
-    for (const n of notes) lines.push(`- ${n}`);
-  }
+      reviewCorrectEls[index].textContent = String(r.correct_count ?? 0);
+      reviewIncorrectEls[index].textContent = String(r.incorrect_count ?? 0);
+      reviewMissingEls[index].textContent = JSON.stringify(missing, null, 2);
+      renderNotes(reviewNotesEls[index], notes);
 
-  return lines.join("\n");
-}
+      // keep raw collapsed, but available
+      reviewRawEls[index].textContent = JSON.stringify(obj, null, 2);
+    }
 
     async function pdfToText(file) {
       const arrayBuffer = await file.arrayBuffer();
@@ -462,7 +627,11 @@ function prettyReviewBlock(obj) {
         for (let i = 0; i < 3; i++) {
           const rp = reviewers[i];
           reviewTitleEls[i].textContent = displayNames[rp] || rp;
-          reviewEls[i].textContent = "Reviewing...";
+          reviewCorrectEls[i].textContent = "...";
+          reviewIncorrectEls[i].textContent = "...";
+          reviewMissingEls[i].textContent = "Reviewing...";
+          reviewNotesEls[i].textContent = "Reviewing...";
+          reviewRawEls[i].textContent = "";
         }
 
         const r = await fetch(`${API_BASE}/review_json`, {
@@ -479,19 +648,19 @@ function prettyReviewBlock(obj) {
         const data = await r.json();
 
         if (!r.ok) {
-          const err = JSON.stringify(data, null, 2);
-          for (let i = 0; i < 3; i++) reviewEls[i].textContent = err;
+          const errObj = { ok: false, error: JSON.stringify(data, null, 2) };
+          for (let i = 0; i < 3; i++) renderReviewCard(i, errObj);
           return;
         }
 
         const res = data.reviewers || {};
         for (let i = 0; i < 3; i++) {
           const rp = reviewers[i];
-          reviewEls[i].textContent = prettyReviewBlock(res[rp]);
+          renderReviewCard(i, res[rp]);
         }
       } catch (e) {
-        const msg = JSON.stringify({ error: String(e?.message || e) }, null, 2);
-        for (let i = 0; i < 3; i++) reviewEls[i].textContent = msg;
+        const msgObj = { ok: false, error: String(e?.message || e) };
+        for (let i = 0; i < 3; i++) renderReviewCard(i, msgObj);
       }
     };
 
