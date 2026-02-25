@@ -12,12 +12,10 @@ function setCors(res) {
 function safeJsonParse(text) {
   const t = (text || "").trim();
 
-  // direct parse
   try {
     return { ok: true, value: JSON.parse(t) };
   } catch {}
 
-  // strip ```json ... ```
   const fenced = t.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (fenced) {
     try {
@@ -25,7 +23,6 @@ function safeJsonParse(text) {
     } catch {}
   }
 
-  // fallback: first object/array
   const match = t.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
   if (match) {
     try {
@@ -165,41 +162,43 @@ function defaultModelFor(provider) {
   );
 }
 
-// Review schema used by UI cards
+// Tolerant schema (numbers instead of integers, notes can be array or string if needed)
 function getReviewSchema() {
   return {
     type: "object",
     properties: {
-      correct_count: { type: "integer" },
-      incorrect_count: { type: "integer" },
+      correct_count: { type: "number" },
+      incorrect_count: { type: "number" },
       missing_properties_json: {
         type: "array",
         items: {
           type: "object",
           properties: {
             material: { type: "string" },
-            properties: {
-              type: "array",
-              items: { type: "string" }
-            },
-            evidence: {
-              type: "array",
-              items: { type: "string" }
-            }
+            properties: { type: "array", items: { type: "string" } },
+            evidence: { type: "array", items: { type: "string" } }
           },
           required: ["material", "properties"]
         }
       },
       notes: {
-        type: "array",
-        items: { type: "string" }
+        anyOf: [
+          { type: "array", items: { type: "string" } },
+          { type: "string" }
+        ]
       }
     },
-    required: ["correct_count", "incorrect_count", "missing_properties_json", "notes"]
+    required: ["correct_count", "incorrect_count", "missing_properties_json"]
   };
 }
 
-// Normalize whatever the reviewer returned into your UI schema
+function toStringArray(v) {
+  if (Array.isArray(v)) return v.map((x) => String(x));
+  if (typeof v === "string" && v.trim()) return [v.trim()];
+  return [];
+}
+
+// Force output into your UI shape, no matter what provider returns
 function normalizeReview(value) {
   const out = {
     correct_count: 0,
@@ -210,52 +209,40 @@ function normalizeReview(value) {
 
   if (!value || typeof value !== "object") return out;
 
-  // counts
-  if (Number.isInteger(value.correct_count)) out.correct_count = value.correct_count;
-  if (Number.isInteger(value.incorrect_count)) out.incorrect_count = value.incorrect_count;
-
-  // sometimes models nest counts
-  if (value.audit_summary && typeof value.audit_summary === "object") {
-    if (Number.isInteger(value.audit_summary.correct_observations)) {
-      out.correct_count = value.audit_summary.correct_observations;
-    }
-    if (Number.isInteger(value.audit_summary.incorrect_observations)) {
-      out.incorrect_count = value.audit_summary.incorrect_observations;
-    }
+  // direct counts
+  if (typeof value.correct_count === "number" && Number.isFinite(value.correct_count)) {
+    out.correct_count = Math.round(value.correct_count);
+  }
+  if (typeof value.incorrect_count === "number" && Number.isFinite(value.incorrect_count)) {
+    out.incorrect_count = Math.round(value.incorrect_count);
   }
 
-  // missing properties (preferred)
+  // nested audit_summary fallback
+  if (value.audit_summary && typeof value.audit_summary === "object") {
+    const c = value.audit_summary.correct_observations;
+    const ic = value.audit_summary.incorrect_observations;
+    if (typeof c === "number" && Number.isFinite(c)) out.correct_count = Math.round(c);
+    if (typeof ic === "number" && Number.isFinite(ic)) out.incorrect_count = Math.round(ic);
+  }
+
+  // missing items (preferred flat shape)
   if (Array.isArray(value.missing_properties_json)) {
     out.missing_properties_json = value.missing_properties_json;
   }
 
-  // alternate nested shape
+  // nested detailed audit fallback
   if (
-    (!out.missing_properties_json || out.missing_properties_json.length === 0) &&
+    out.missing_properties_json.length === 0 &&
     value.detailed_audit &&
     Array.isArray(value.detailed_audit.missing_items)
   ) {
-    out.missing_properties_json = value.detailed_audit.missing_items.map((x) => ({
-      material: String(x?.material ?? ""),
-      properties: Array.isArray(x?.properties) ? x.properties.map(String) : [],
-      evidence: Array.isArray(x?.evidence) ? x.evidence.map(String) : []
-    }));
+    out.missing_properties_json = value.detailed_audit.missing_items;
   }
 
-  // notes can come back as string or array
-  if (Array.isArray(value.notes)) {
-    out.notes = value.notes.map(String);
-  } else if (typeof value.notes === "string" && value.notes.trim()) {
-    out.notes = [value.notes.trim()];
-  }
-
-  if (typeof value.reviewer_summary === "string" && value.reviewer_summary.trim()) {
-    out.notes.unshift(value.reviewer_summary.trim());
-  }
-
-  if (Array.isArray(value.validation_notes)) {
-    out.notes.push(...value.validation_notes.map(String));
-  }
+  // notes from many possible fields
+  out.notes.push(...toStringArray(value.notes));
+  out.notes.push(...toStringArray(value.reviewer_summary));
+  out.notes.push(...toStringArray(value.validation_notes));
 
   // sanitize missing items
   out.missing_properties_json = (out.missing_properties_json || [])
@@ -267,22 +254,22 @@ function normalizeReview(value) {
     }))
     .filter((x) => x.material || x.properties.length > 0);
 
+  // de-dup notes
+  out.notes = [...new Set(out.notes.map((n) => String(n).trim()).filter(Boolean))];
+
   return out;
 }
 
 function reviewSystemPrompt() {
   return [
     "You are a strict scientific extraction reviewer.",
-    "You will review a candidate JSON extraction against the source text.",
-    "Return ONLY valid JSON (no markdown, no code fences, no prose outside JSON).",
-    "Do NOT rewrite the candidate extraction.",
-    "Your output must contain exactly these top-level fields:",
-    "correct_count (integer), incorrect_count (integer), missing_properties_json (array), notes (array of strings).",
-    "Count an observation as incorrect only if it is unsupported, misattributed, or contradicted by the source text.",
-    "Do not list correct observations individually.",
-    "In missing_properties_json, include only additional supported properties missing from the candidate.",
-    "Each missing item should contain: material, properties (array of strings), and optional evidence (array of strings).",
-    "Keep notes concise."
+    "Review the candidate JSON extraction against the source text.",
+    "Return ONLY JSON. No markdown fences.",
+    "Do not rewrite the extraction.",
+    "Output fields:",
+    "correct_count (number), incorrect_count (number), missing_properties_json (array), notes (array or string).",
+    "Only list additional missing properties in missing_properties_json.",
+    "Do not list all correct items."
   ].join(" ");
 }
 
@@ -290,27 +277,30 @@ async function runSingleReview({ provider, model, source_text, schema, candidate
   const system = reviewSystemPrompt();
 
   const user = JSON.stringify({
-    task: "Review this candidate extraction against the source text.",
+    task: "Review candidate extraction against source text.",
     source_text,
     extraction_schema: schema,
     candidate_json,
-    expected_output_format: {
-      correct_count: 0,
-      incorrect_count: 0,
+    expected_output_example: {
+      correct_count: 8,
+      incorrect_count: 1,
       missing_properties_json: [
         {
-          material: "string",
-          properties: ["string"],
-          evidence: ["string"]
+          material: "example material",
+          properties: ["missing property"],
+          evidence: ["evidence snippet"]
         }
       ],
-      notes: ["string"]
+      notes: ["brief note"]
     }
   });
 
   const validate = ajv.compile(getReviewSchema());
 
   let lastRaw = "";
+  let lastNormalized = null;
+  let lastErrors = null;
+
   for (let attempt = 1; attempt <= 2; attempt++) {
     const raw = await callProvider({ provider, model, system, user });
     lastRaw = raw;
@@ -319,9 +309,34 @@ async function runSingleReview({ provider, model, source_text, schema, candidate
     if (!parsed.ok) continue;
 
     const normalized = normalizeReview(parsed.value);
-    if (validate(normalized)) {
+    lastNormalized = normalized;
+
+    // validate, but don't hard fail if normalization is already usable
+    const ok = validate(normalized);
+    if (ok) {
       return { ok: true, review: normalized };
+    } else {
+      lastErrors = validate.errors;
+      // still return if shape is usable enough for UI
+      if (
+        typeof normalized.correct_count === "number" &&
+        typeof normalized.incorrect_count === "number" &&
+        Array.isArray(normalized.missing_properties_json) &&
+        Array.isArray(normalized.notes)
+      ) {
+        return { ok: true, review: normalized, warning: "Normalized reviewer output (schema relaxed)" };
+      }
     }
+  }
+
+  // final fallback: return normalized if we have it
+  if (lastNormalized) {
+    return {
+      ok: true,
+      review: lastNormalized,
+      warning: "Reviewer output normalized from non-standard shape",
+      validation_errors: lastErrors || undefined
+    };
   }
 
   return {
@@ -361,7 +376,6 @@ export default async function handler(req, res) {
 
     const allowed = ["openai", "anthropic", "gemini", "deepseek"];
     const finalReviewers = reviewers.filter((r) => allowed.includes(r));
-
     if (!finalReviewers.length) {
       return res.status(400).json({ error: "No valid reviewers" });
     }
@@ -370,16 +384,18 @@ export default async function handler(req, res) {
     for (const provider of finalReviewers) {
       const model = defaultModelFor(provider);
       try {
-        results[provider] = await runSingleReview({
+        const reviewed = await runSingleReview({
           provider,
           model,
           source_text,
           schema,
           candidate_json
         });
-        // include provider/model for UI display
-        results[provider].provider = provider;
-        results[provider].model = model;
+        results[provider] = {
+          ...reviewed,
+          provider,
+          model
+        };
       } catch (err) {
         results[provider] = {
           ok: false,
