@@ -19,6 +19,8 @@
     .muted { color: #666; }
     .ok { color: #0a7f3f; }
     .err { color: #b42318; font-weight: 600; }
+    .hidden { display: none !important; }
+
     .mode-box {
       background: #f8fafc;
       border: 1px solid #e2e8f0;
@@ -33,7 +35,6 @@
       border-radius: 6px;
       font-size: 12px;
     }
-    .hidden { display: none !important; }
 
     .review-grid {
       display: grid;
@@ -61,6 +62,7 @@
       gap: 8px;
       margin-bottom: 10px;
     }
+
     .stat-box {
       border: 1px solid #e5e7eb;
       border-radius: 8px;
@@ -68,11 +70,13 @@
       background: #f8fafc;
       text-align: center;
     }
+
     .stat-label {
       font-size: 12px;
       color: #666;
       margin-bottom: 4px;
     }
+
     .stat-value {
       font-size: 22px;
       font-weight: 700;
@@ -368,31 +372,26 @@
       document.getElementById("review-title-2"),
       document.getElementById("review-title-3")
     ];
-
     const reviewCorrectEls = [
       document.getElementById("review-1-correct"),
       document.getElementById("review-2-correct"),
       document.getElementById("review-3-correct")
     ];
-
     const reviewIncorrectEls = [
       document.getElementById("review-1-incorrect"),
       document.getElementById("review-2-incorrect"),
       document.getElementById("review-3-incorrect")
     ];
-
     const reviewMissingEls = [
       document.getElementById("review-1-missing"),
       document.getElementById("review-2-missing"),
       document.getElementById("review-3-missing")
     ];
-
     const reviewNotesEls = [
       document.getElementById("review-1-notes"),
       document.getElementById("review-2-notes"),
       document.getElementById("review-3-notes")
     ];
-
     const reviewRawEls = [
       document.getElementById("review-1-raw"),
       document.getElementById("review-2-raw"),
@@ -407,8 +406,7 @@
     };
 
     function applyInputMode() {
-      const mode = inputModeEl.value;
-      if (mode === "pdf") {
+      if (inputModeEl.value === "pdf") {
         pdfSectionEl.classList.remove("hidden");
         lookupSectionEl.classList.add("hidden");
       } else {
@@ -418,17 +416,13 @@
     }
 
     function applyModeDefaults() {
-      const mode = modeEl.value;
-
-      if (mode === "one_shot") {
+      if (modeEl.value === "one_shot") {
         schemaEl.value = BASIC_SCHEMA;
         includeDebug = false;
         schemaHintEl.innerHTML = `Auto schema: <code class="inline">basic</code>.`;
         modeInfoEl.innerHTML = `
           <div class="mode-title">One-shot baseline</div>
-          <div class="tiny muted">
-            Original baseline behavior with the basic schema.
-          </div>
+          <div class="tiny muted">Uses the original basic schema.</div>
         `;
       } else {
         schemaEl.value = CONTEXTUAL_SCHEMA;
@@ -436,9 +430,7 @@
         schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code>.`;
         modeInfoEl.innerHTML = `
           <div class="mode-title">Two-shot mode</div>
-          <div class="tiny muted">
-            Verification-enabled extraction with the contextual schema.
-          </div>
+          <div class="tiny muted">Uses the richer contextual schema.</div>
         `;
       }
     }
@@ -455,8 +447,7 @@
     }
 
     function getDynamicReviewers(selectedProvider) {
-      const all = ["openai", "anthropic", "gemini", "deepseek"];
-      return all.filter(p => p !== selectedProvider);
+      return ["openai", "anthropic", "gemini", "deepseek"].filter(p => p !== selectedProvider);
     }
 
     function renderNotes(el, notes) {
@@ -466,9 +457,9 @@
       }
       const ul = document.createElement("ul");
       ul.className = "notes-list tiny";
-      for (const n of notes) {
+      for (const note of notes) {
         const li = document.createElement("li");
-        li.textContent = String(n);
+        li.textContent = String(note);
         ul.appendChild(li);
       }
       el.innerHTML = "";
@@ -566,18 +557,15 @@
         lastSourceTextForReview = abstractText;
         clearReviews();
 
-        previewEl.textContent =
-          pdfText.slice(0, 2000) + (pdfText.length > 2000 ? "\n\n...[truncated]" : "");
-
-        abstractPreviewEl.textContent =
-          abstractText || "(No abstract heading detected; fallback text used.)";
+        previewEl.textContent = pdfText.slice(0, 2000) + (pdfText.length > 2000 ? "\n\n...[truncated]" : "");
+        abstractPreviewEl.textContent = abstractText || "(No abstract heading detected; fallback text used.)";
 
         statusEl.innerHTML =
           `<span class="ok">Loaded PDF text</span> (${pdfText.length.toLocaleString()} chars). <span class="ok">Abstract extracted</span> (${abstractText.length.toLocaleString()} chars).`;
       } catch (e) {
         console.error(e);
         statusEl.textContent = "Failed to extract PDF text.";
-        alert("Failed to extract PDF text. Try a different PDF or smaller file.");
+        alert("Failed to extract PDF text.");
       }
     };
 
@@ -593,12 +581,11 @@
         const provider = providerEl.value;
         const modelInput = document.getElementById("model").value.trim();
         const mode = modeEl.value;
-        const inputMode = inputModeEl.value;
 
         outEl.textContent = "Calling backend...";
         clearReviews();
 
-        if (inputMode === "pdf") {
+        if (inputModeEl.value === "pdf") {
           if (!pdfText) return alert("Load PDF text first.");
           if (!abstractText) return alert("No abstract text available.");
 
@@ -686,11 +673,15 @@
         }
 
         const candidate = extracted.result ?? extracted;
-        const selectedProvider = providerEl.value;
-        const reviewers = getDynamicReviewers(selectedProvider);
+        const reviewers = getDynamicReviewers(providerEl.value);
 
-        if (!lastSourceTextForReview) {
-          return alert("No source text/lookup metadata available for review.");
+        const reviewSourceText =
+          inputModeEl.value === "pdf"
+            ? abstractText
+            : (extracted.source_text || lastSourceTextForReview || "");
+
+        if (!reviewSourceText) {
+          return alert("No abstract/source text available for cross-model review.");
         }
 
         for (let i = 0; i < 3; i++) {
@@ -707,7 +698,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            source_text: lastSourceTextForReview,
+            source_text: reviewSourceText,
             schema,
             candidate_json: candidate,
             reviewers
@@ -728,8 +719,8 @@
           renderReviewCard(i, res[rp]);
         }
       } catch (e) {
-        const msgObj = { ok: false, error: String(e?.message || e) };
-        for (let i = 0; i < 3; i++) renderReviewCard(i, msgObj);
+        const errObj = { ok: false, error: String(e?.message || e) };
+        for (let i = 0; i < 3; i++) renderReviewCard(i, errObj);
       }
     };
 
