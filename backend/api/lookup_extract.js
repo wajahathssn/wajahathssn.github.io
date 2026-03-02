@@ -73,7 +73,16 @@ function reconstructOpenAlexAbstract(inv) {
   return entries.map((x) => x[1]).join(" ").trim();
 }
 
-function scoreCandidate({ queryTitle, queryYear, queryJournal, candidateTitle, candidateYear, candidateJournal, hasAbstract, hasDoi }) {
+function scoreCandidate({
+  queryTitle,
+  queryYear,
+  queryJournal,
+  candidateTitle,
+  candidateYear,
+  candidateJournal,
+  hasAbstract,
+  hasDoi
+}) {
   let score = 0;
 
   const tScore = overlapScore(queryTitle, candidateTitle);
@@ -666,6 +675,7 @@ export default async function handler(req, res) {
           source: best.source,
           score: best.score
         },
+        source_text: best.abstract,
         error: runResult.error,
         raw: runResult.raw
       });
@@ -685,6 +695,7 @@ export default async function handler(req, res) {
         source: best.source,
         score: best.score
       },
+      source_text: best.abstract,
       result: runResult.result
     };
 
