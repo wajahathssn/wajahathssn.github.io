@@ -65,9 +65,7 @@ function reconstructOpenAlexAbstract(inv) {
   const entries = [];
   for (const [word, positions] of Object.entries(inv)) {
     if (!Array.isArray(positions)) continue;
-    for (const pos of positions) {
-      entries.push([pos, word]);
-    }
+    for (const pos of positions) entries.push([pos, word]);
   }
   entries.sort((a, b) => a[0] - b[0]);
   return entries.map((x) => x[1]).join(" ").trim();
@@ -84,17 +82,11 @@ function scoreCandidate({
   hasDoi
 }) {
   let score = 0;
-
-  const tScore = overlapScore(queryTitle, candidateTitle);
-  const jScore = overlapScore(queryJournal, candidateJournal);
-
-  score += tScore * 70;
-  score += jScore * 15;
-
+  score += overlapScore(queryTitle, candidateTitle) * 70;
+  score += overlapScore(queryJournal, candidateJournal) * 15;
   if (queryYear && candidateYear && Number(queryYear) === Number(candidateYear)) score += 10;
   if (hasAbstract) score += 10;
   if (hasDoi) score += 5;
-
   return score;
 }
 
@@ -123,16 +115,13 @@ async function searchCrossref({ title, year, journal }) {
       x?.published?.["date-parts"]?.[0]?.[0] ||
       null;
 
-    const abstract = stripHtml(x.abstract || "");
-    const doi = x.DOI || "";
-
     return {
       source: "crossref",
       title: candidateTitle,
       journal: candidateJournal,
       year: candidateYear,
-      doi,
-      abstract,
+      doi: x.DOI || "",
+      abstract: stripHtml(x.abstract || ""),
       score: scoreCandidate({
         queryTitle: title,
         queryYear: year,
@@ -140,10 +129,9 @@ async function searchCrossref({ title, year, journal }) {
         candidateTitle,
         candidateYear,
         candidateJournal,
-        hasAbstract: !!abstract,
-        hasDoi: !!doi
-      }),
-      raw: x
+        hasAbstract: !!x.abstract,
+        hasDoi: !!x.DOI
+      })
     };
   });
 
@@ -186,8 +174,7 @@ async function searchOpenAlex({ title, year, journal }) {
         candidateJournal,
         hasAbstract: !!abstract,
         hasDoi: !!doi
-      }),
-      raw: x
+      })
     };
   });
 
@@ -199,13 +186,11 @@ async function findBestPaper({ title, year, journal }) {
   let candidates = [];
 
   try {
-    const crossref = await searchCrossref({ title, year, journal });
-    candidates.push(...crossref);
+    candidates.push(...await searchCrossref({ title, year, journal }));
   } catch {}
 
   try {
-    const openalex = await searchOpenAlex({ title, year, journal });
-    candidates.push(...openalex);
+    candidates.push(...await searchOpenAlex({ title, year, journal }));
   } catch {}
 
   if (!candidates.length) {
@@ -310,12 +295,10 @@ async function callGemini({ model, system, user }) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: `${system}\n\n${user}` }]
-        }
-      ],
+      contents: [{
+        role: "user",
+        parts: [{ text: `${system}\n\n${user}` }]
+      }],
       generationConfig: { temperature: 0 }
     })
   });
@@ -328,16 +311,11 @@ async function callGemini({ model, system, user }) {
 
 async function callProvider({ provider, model, system, user }) {
   switch (provider) {
-    case "openai":
-      return callOpenAI({ model, system, user });
-    case "deepseek":
-      return callDeepSeek({ model, system, user });
-    case "anthropic":
-      return callAnthropic({ model, system, user });
-    case "gemini":
-      return callGemini({ model, system, user });
-    default:
-      throw new Error(`Unknown provider: ${provider}`);
+    case "openai": return callOpenAI({ model, system, user });
+    case "deepseek": return callDeepSeek({ model, system, user });
+    case "anthropic": return callAnthropic({ model, system, user });
+    case "gemini": return callGemini({ model, system, user });
+    default: throw new Error(`Unknown provider: ${provider}`);
   }
 }
 
@@ -419,22 +397,10 @@ function getRulePlanSchema() {
           required: ["name", "role"]
         }
       },
-      claim_types: {
-        type: "array",
-        items: { type: "string" }
-      },
-      paper_specific_rules: {
-        type: "array",
-        items: { type: "string" }
-      },
-      common_failure_modes: {
-        type: "array",
-        items: { type: "string" }
-      },
-      qualifier_expectations: {
-        type: "array",
-        items: { type: "string" }
-      }
+      claim_types: { type: "array", items: { type: "string" } },
+      paper_specific_rules: { type: "array", items: { type: "string" } },
+      common_failure_modes: { type: "array", items: { type: "string" } },
+      qualifier_expectations: { type: "array", items: { type: "string" } }
     },
     required: ["paper_specific_rules"]
   };
@@ -448,20 +414,12 @@ async function runOneShot({ provider, model, prompt, schema, validate }) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     const raw = await callProvider({ provider, model, system, user });
     lastRaw = raw;
-
     const parsed = safeJsonParse(raw);
     if (!parsed.ok) continue;
-
-    if (validate(parsed.value)) {
-      return { ok: true, result: parsed.value };
-    }
+    if (validate(parsed.value)) return { ok: true, result: parsed.value };
   }
 
-  return {
-    ok: false,
-    error: "Model output did not validate against schema",
-    raw: lastRaw
-  };
+  return { ok: false, error: "Model output did not validate against schema", raw: lastRaw };
 }
 
 async function runTwoShot({ provider, model, prompt, schema, validate }) {
@@ -472,31 +430,19 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
   let pass1Parsed = null;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const raw = await callProvider({
-      provider,
-      model,
-      system: pass1System,
-      user: pass1User
-    });
+    const raw = await callProvider({ provider, model, system: pass1System, user: pass1User });
     pass1Raw = raw;
-
     const parsed = safeJsonParse(raw);
     if (!parsed.ok) continue;
-
     pass1Parsed = parsed.value;
     break;
   }
 
   if (!pass1Parsed) {
-    return {
-      ok: false,
-      error: "Two-shot pass 1 failed to produce parseable JSON",
-      raw: pass1Raw
-    };
+    return { ok: false, error: "Two-shot pass 1 failed to produce parseable JSON", raw: pass1Raw };
   }
 
-  const rulePlanSchema = getRulePlanSchema();
-  const rulePlanValidate = ajv.compile(rulePlanSchema);
+  const rulePlanValidate = ajv.compile(getRulePlanSchema());
 
   const rulesSystem = rulesSystemPromptTwoShot();
   const rulesUser = JSON.stringify({
@@ -509,17 +455,10 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
   let rulesPlan = null;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const raw = await callProvider({
-      provider,
-      model,
-      system: rulesSystem,
-      user: rulesUser
-    });
+    const raw = await callProvider({ provider, model, system: rulesSystem, user: rulesUser });
     rulesRaw = raw;
-
     const parsed = safeJsonParse(raw);
     if (!parsed.ok) continue;
-
     if (rulePlanValidate(parsed.value)) {
       rulesPlan = parsed.value;
       break;
@@ -546,8 +485,8 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
   });
 
   const pass2Model = verifierModelFor(provider, model);
-
   let pass2Raw = "";
+
   for (let attempt = 1; attempt <= 2; attempt++) {
     const raw = await callProvider({
       provider,
@@ -559,7 +498,6 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
 
     const parsed = safeJsonParse(raw);
     if (!parsed.ok) continue;
-
     if (validate(parsed.value)) {
       return {
         ok: true,
@@ -603,9 +541,7 @@ export default async function handler(req, res) {
     const required = process.env.API_AUTH_KEY;
     if (required) {
       const got = req.headers["x-api-key"];
-      if (got !== required) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
+      if (got !== required) return res.status(401).json({ error: "Unauthorized" });
     }
 
     const {
@@ -637,7 +573,8 @@ export default async function handler(req, res) {
           matched_journal: best.journal,
           matched_year: best.year,
           doi: best.doi || "",
-          source: best.source
+          source: best.source,
+          score: best.score
         }
       });
     }
@@ -645,7 +582,6 @@ export default async function handler(req, res) {
     const p = provider || "openai";
     const m = model || defaultModelFor(p);
     const extractionMode = mode || "one_shot";
-
     const validate = ajv.compile(schema);
 
     const instruction =
@@ -700,9 +636,7 @@ export default async function handler(req, res) {
     };
 
     if (runResult.warning) response.warning = runResult.warning;
-    if (include_debug === true && runResult.debug) {
-      response.debug = runResult.debug;
-    }
+    if (include_debug === true && runResult.debug) response.debug = runResult.debug;
 
     return res.status(200).json(response);
   } catch (err) {
