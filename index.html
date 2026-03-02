@@ -654,7 +654,7 @@
         if (r.ok && data.lookup) {
           lookupStatusEl.innerHTML =
             `<span class="ok">Matched:</span> ${data.lookup.matched_title || ""} (${data.lookup.matched_year || ""}) — ${data.lookup.matched_journal || ""}`;
-          lastSourceTextForReview = JSON.stringify(data.lookup);
+          lastSourceTextForReview = data.source_text || "";
         } else {
           lookupStatusEl.textContent = "Paper lookup failed.";
           lastSourceTextForReview = "";
