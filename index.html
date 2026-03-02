@@ -11,7 +11,7 @@
     pre { background: #f6f8fa; padding: 12px; border-radius: 10px; overflow:auto; white-space: pre-wrap; }
     .row { display:flex; gap:12px; flex-wrap:wrap; align-items: end; }
     button { padding: 10px 14px; cursor:pointer; }
-    input[type="file"] { padding: 8px; }
+    input[type="file"], input[type="text"], input[type="number"] { padding: 8px; }
     .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; margin-top: 12px; }
     small { color: #555; }
     .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eef2ff; font-size:12px; margin-right:6px; }
@@ -32,7 +32,6 @@
       border-radius: 6px;
       font-size: 12px;
     }
-
     .review-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(260px, 1fr));
@@ -41,7 +40,6 @@
     @media (max-width: 900px) {
       .review-grid { grid-template-columns: 1fr; }
     }
-
     .review-card {
       border: 1px solid #e5e7eb;
       border-radius: 10px;
@@ -52,14 +50,12 @@
       margin: 0 0 8px 0;
       font-size: 14px;
     }
-
     .review-stats {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 8px;
       margin-bottom: 10px;
     }
-
     .stat-box {
       border: 1px solid #e5e7eb;
       border-radius: 8px;
@@ -67,35 +63,21 @@
       background: #f8fafc;
       text-align: center;
     }
-
     .stat-label {
       font-size: 12px;
       color: #666;
       margin-bottom: 4px;
     }
-
     .stat-value {
       font-size: 22px;
       font-weight: 700;
       line-height: 1.1;
     }
-
-    .review-block {
-      margin-top: 8px;
-    }
-
-    .notes-list {
-      margin: 0;
-      padding-left: 18px;
-    }
-    .notes-list li {
-      margin: 2px 0;
-    }
-
-    .err {
-      color: #b42318;
-      font-weight: 600;
-    }
+    .review-block { margin-top: 8px; }
+    .notes-list { margin: 0; padding-left: 18px; }
+    .notes-list li { margin: 2px 0; }
+    .err { color: #b42318; font-weight: 600; }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
@@ -103,28 +85,58 @@
   <p><small class="pill">Wajahat Hussain</small></p>
 
   <div class="card">
-    <h3>1) Choose a PDF</h3>
+    <h3>1) Input mode</h3>
     <div class="row">
-      <div style="flex:2; min-width:280px;">
-        <small>PDF file</small>
-        <input id="pdf" type="file" accept="application/pdf" />
-      </div>
-      <div style="flex:1; min-width:220px;">
-        <button id="loadBtn" style="width:100%;">Load PDF Text</button>
+      <div style="flex:1; min-width:240px;">
+        <small>Input type</small>
+        <select id="inputMode" style="padding:10px;">
+          <option value="pdf" selected>Upload PDF</option>
+          <option value="lookup">Lookup paper</option>
+        </select>
       </div>
     </div>
 
-    <p><small id="status">No PDF loaded.</small></p>
+    <div id="pdfSection" style="margin-top:12px;">
+      <div class="row">
+        <div style="flex:2; min-width:280px;">
+          <small>PDF file</small>
+          <input id="pdf" type="file" accept="application/pdf" />
+        </div>
+        <div style="flex:1; min-width:220px;">
+          <button id="loadBtn" style="width:100%;">Load PDF Text</button>
+        </div>
+      </div>
 
-    <details>
-      <summary><small>Preview extracted text (first ~2000 chars)</small></summary>
-      <pre id="preview"></pre>
-    </details>
+      <p><small id="status">No PDF loaded.</small></p>
 
-    <details style="margin-top:8px;">
-      <summary><small>Preview detected abstract</small></summary>
-      <pre id="abstractPreview"></pre>
-    </details>
+      <details>
+        <summary><small>Preview extracted text (first ~2000 chars)</small></summary>
+        <pre id="preview"></pre>
+      </details>
+
+      <details style="margin-top:8px;">
+        <summary><small>Preview detected abstract</small></summary>
+        <pre id="abstractPreview"></pre>
+      </details>
+    </div>
+
+    <div id="lookupSection" class="hidden" style="margin-top:12px;">
+      <div class="row">
+        <div style="flex:2; min-width:280px;">
+          <small>Paper title</small>
+          <input id="paperTitle" type="text" placeholder="Enter paper title" />
+        </div>
+        <div style="flex:1; min-width:160px;">
+          <small>Year</small>
+          <input id="paperYear" type="number" placeholder="2021" />
+        </div>
+        <div style="flex:2; min-width:240px;">
+          <small>Journal</small>
+          <input id="paperJournal" type="text" placeholder="Optional journal name" />
+        </div>
+      </div>
+      <p><small id="lookupStatus">No paper lookup run yet.</small></p>
+    </div>
   </div>
 
   <div class="card">
@@ -181,7 +193,6 @@
     <div class="review-grid">
       <div class="review-card">
         <h4 id="review-title-1">Reviewer 1</h4>
-
         <div class="review-stats">
           <div class="stat-box">
             <div class="stat-label">Correct</div>
@@ -192,17 +203,14 @@
             <div class="stat-value" id="review-1-incorrect">-</div>
           </div>
         </div>
-
         <div class="review-block">
           <div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div>
           <pre id="review-1-missing">[]</pre>
         </div>
-
         <div class="review-block">
           <div class="tiny muted" style="margin-bottom:6px;">Notes</div>
           <div id="review-1-notes" class="tiny muted">None</div>
         </div>
-
         <details style="margin-top:8px;">
           <summary><small>Raw / error output</small></summary>
           <pre id="review-1-raw"></pre>
@@ -211,7 +219,6 @@
 
       <div class="review-card">
         <h4 id="review-title-2">Reviewer 2</h4>
-
         <div class="review-stats">
           <div class="stat-box">
             <div class="stat-label">Correct</div>
@@ -222,17 +229,14 @@
             <div class="stat-value" id="review-2-incorrect">-</div>
           </div>
         </div>
-
         <div class="review-block">
           <div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div>
           <pre id="review-2-missing">[]</pre>
         </div>
-
         <div class="review-block">
           <div class="tiny muted" style="margin-bottom:6px;">Notes</div>
           <div id="review-2-notes" class="tiny muted">None</div>
         </div>
-
         <details style="margin-top:8px;">
           <summary><small>Raw / error output</small></summary>
           <pre id="review-2-raw"></pre>
@@ -241,7 +245,6 @@
 
       <div class="review-card">
         <h4 id="review-title-3">Reviewer 3</h4>
-
         <div class="review-stats">
           <div class="stat-box">
             <div class="stat-label">Correct</div>
@@ -252,17 +255,14 @@
             <div class="stat-value" id="review-3-incorrect">-</div>
           </div>
         </div>
-
         <div class="review-block">
           <div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div>
           <pre id="review-3-missing">[]</pre>
         </div>
-
         <div class="review-block">
           <div class="tiny muted" style="margin-bottom:6px;">Notes</div>
           <div id="review-3-notes" class="tiny muted">None</div>
         </div>
-
         <details style="margin-top:8px;">
           <summary><small>Raw / error output</small></summary>
           <pre id="review-3-raw"></pre>
@@ -274,11 +274,9 @@
   <script type="module">
     const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
 
-    // One-shot baseline (unchanged)
     const ONE_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract.";
 
-    // Two-shot prompt (qualifier-aware)
     const TWO_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.";
 
@@ -340,10 +338,19 @@
     let abstractText = "";
     let includeDebug = false;
 
+    const inputModeEl = document.getElementById("inputMode");
+    const pdfSectionEl = document.getElementById("pdfSection");
+    const lookupSectionEl = document.getElementById("lookupSection");
+
     const statusEl = document.getElementById("status");
     const previewEl = document.getElementById("preview");
     const abstractPreviewEl = document.getElementById("abstractPreview");
+    const lookupStatusEl = document.getElementById("lookupStatus");
     const outEl = document.getElementById("out");
+
+    const paperTitleEl = document.getElementById("paperTitle");
+    const paperYearEl = document.getElementById("paperYear");
+    const paperJournalEl = document.getElementById("paperJournal");
 
     const modeEl = document.getElementById("mode");
     const providerEl = document.getElementById("provider");
@@ -393,6 +400,17 @@
       gemini: "Gemini",
       deepseek: "DeepSeek"
     };
+
+    function applyInputMode() {
+      const mode = inputModeEl.value;
+      if (mode === "pdf") {
+        pdfSectionEl.classList.remove("hidden");
+        lookupSectionEl.classList.add("hidden");
+      } else {
+        pdfSectionEl.classList.add("hidden");
+        lookupSectionEl.classList.remove("hidden");
+      }
+    }
 
     function applyModeDefaults() {
       const mode = modeEl.value;
@@ -479,8 +497,6 @@
       reviewIncorrectEls[index].textContent = String(r.incorrect_count ?? 0);
       reviewMissingEls[index].textContent = JSON.stringify(missing, null, 2);
       renderNotes(reviewNotesEls[index], notes);
-
-      // keep raw collapsed, but available
       reviewRawEls[index].textContent = JSON.stringify(obj, null, 2);
     }
 
@@ -527,8 +543,11 @@
       return (end > 0 ? after.slice(0, end) : after.slice(0, 5000)).trim();
     }
 
+    applyInputMode();
     applyModeDefaults();
     clearReviews();
+
+    inputModeEl.addEventListener("change", applyInputMode);
     modeEl.addEventListener("change", applyModeDefaults);
 
     document.getElementById("loadBtn").onclick = async () => {
@@ -558,9 +577,6 @@
 
     document.getElementById("runBtn").onclick = async () => {
       try {
-        if (!pdfText) return alert("Load PDF text first.");
-        if (!abstractText) return alert("No abstract text available.");
-
         let schema;
         try {
           schema = JSON.parse(schemaEl.value);
@@ -571,28 +587,71 @@
         const provider = providerEl.value;
         const modelInput = document.getElementById("model").value.trim();
         const mode = modeEl.value;
-        const instruction = mode === "one_shot" ? ONE_SHOT_INSTRUCTION : TWO_SHOT_INSTRUCTION;
-        const prompt = `DOCUMENT TEXT:\n${abstractText}\n\nTASK:\n${instruction}`;
+        const inputMode = inputModeEl.value;
 
         outEl.textContent = "Calling backend...";
         clearReviews();
 
-        const r = await fetch(`${API_BASE}/extract_json`, {
+        if (inputMode === "pdf") {
+          if (!pdfText) return alert("Load PDF text first.");
+          if (!abstractText) return alert("No abstract text available.");
+
+          const instruction = mode === "one_shot" ? ONE_SHOT_INSTRUCTION : TWO_SHOT_INSTRUCTION;
+          const prompt = `DOCUMENT TEXT:\n${abstractText}\n\nTASK:\n${instruction}`;
+
+          const r = await fetch(`${API_BASE}/extract_json`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              provider,
+              model: modelInput || undefined,
+              mode,
+              retrieval_mode: "abstract_only",
+              include_debug: includeDebug,
+              prompt,
+              schema
+            })
+          });
+
+          const data = await r.json();
+          outEl.textContent = JSON.stringify(data, null, 2);
+          return;
+        }
+
+        // lookup mode
+        const title = paperTitleEl.value.trim();
+        const year = paperYearEl.value.trim();
+        const journal = paperJournalEl.value.trim();
+
+        if (!title) return alert("Enter a paper title.");
+
+        lookupStatusEl.textContent = "Looking up paper metadata and abstract...";
+
+        const r = await fetch(`${API_BASE}/lookup_extract`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            title,
+            year: year || undefined,
+            journal: journal || undefined,
             provider,
             model: modelInput || undefined,
             mode,
-            retrieval_mode: "abstract_only",
             include_debug: includeDebug,
-            prompt,
             schema
           })
         });
 
         const data = await r.json();
         outEl.textContent = JSON.stringify(data, null, 2);
+
+        if (r.ok && data.lookup) {
+          lookupStatusEl.innerHTML =
+            `<span class="ok">Matched:</span> ${data.lookup.matched_title || ""} (${data.lookup.matched_year || ""}) — ${data.lookup.matched_journal || ""}`;
+          abstractText = ""; // no local abstract text from frontend in lookup mode
+        } else {
+          lookupStatusEl.textContent = "Paper lookup failed.";
+        }
       } catch (e) {
         console.error(e);
         outEl.textContent = JSON.stringify({ error: String(e?.message || e) }, null, 2);
@@ -601,7 +660,6 @@
 
     document.getElementById("reviewBtn").onclick = async () => {
       try {
-        if (!abstractText) return alert("Load a PDF first.");
         if (!outEl.textContent || outEl.textContent.trim() === "{}") {
           return alert("Run extraction first.");
         }
@@ -624,6 +682,17 @@
         const selectedProvider = providerEl.value;
         const reviewers = getDynamicReviewers(selectedProvider);
 
+        const sourceText =
+          inputModeEl.value === "pdf"
+            ? abstractText
+            : (extracted.lookup && extracted.lookup.matched_title
+                ? `${extracted.lookup.matched_title}\n${extracted.lookup.matched_journal || ""}\n${extracted.lookup.matched_year || ""}`
+                : "");
+
+        if (!sourceText) {
+          return alert("No source text available for review.");
+        }
+
         for (let i = 0; i < 3; i++) {
           const rp = reviewers[i];
           reviewTitleEls[i].textContent = displayNames[rp] || rp;
@@ -638,7 +707,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            source_text: abstractText,
+            source_text: inputModeEl.value === "pdf" ? abstractText : JSON.stringify(extracted.lookup || {}),
             schema,
             candidate_json: candidate,
             reviewers
