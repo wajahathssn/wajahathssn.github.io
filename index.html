@@ -33,44 +33,13 @@
       border-radius: 6px;
       font-size: 12px;
     }
-
-    .source-toggle {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 10px;
-    }
-
-    .source-btn {
-      border: 1px solid #cbd5e1;
-      background: white;
-      border-radius: 10px;
-      padding: 12px 14px;
-      min-width: 220px;
-      text-align: left;
-      cursor: pointer;
-    }
-
-    .source-btn.active {
-      border-color: #6366f1;
-      background: #eef2ff;
-    }
-
-    .source-btn-title {
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-
-    .hidden {
-      display: none;
-    }
+    .hidden { display: none !important; }
 
     .review-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(260px, 1fr));
       gap: 12px;
     }
-
     @media (max-width: 900px) {
       .review-grid { grid-template-columns: 1fr; }
     }
@@ -81,7 +50,6 @@
       padding: 10px;
       background: #fff;
     }
-
     .review-card h4 {
       margin: 0 0 8px 0;
       font-size: 14px;
@@ -93,7 +61,6 @@
       gap: 8px;
       margin-bottom: 10px;
     }
-
     .stat-box {
       border: 1px solid #e5e7eb;
       border-radius: 8px;
@@ -101,13 +68,11 @@
       background: #f8fafc;
       text-align: center;
     }
-
     .stat-label {
       font-size: 12px;
       color: #666;
       margin-bottom: 4px;
     }
-
     .stat-value {
       font-size: 22px;
       font-weight: 700;
@@ -115,15 +80,8 @@
     }
 
     .review-block { margin-top: 8px; }
-
-    .notes-list {
-      margin: 0;
-      padding-left: 18px;
-    }
-
-    .notes-list li {
-      margin: 2px 0;
-    }
+    .notes-list { margin: 0; padding-left: 18px; }
+    .notes-list li { margin: 2px 0; }
   </style>
 </head>
 <body>
@@ -131,22 +89,18 @@
   <p><small class="pill">Wajahat Hussain</small></p>
 
   <div class="card">
-    <h3>1) Choose paper source</h3>
-    <p class="tiny muted">Pick whether you want to upload a paper yourself or look it up by metadata.</p>
-
-    <div class="source-toggle">
-      <button id="sourcePdfBtn" class="source-btn active" type="button">
-        <div class="source-btn-title">Upload PDF</div>
-        <div class="tiny muted">Choose a paper file and extract the abstract locally in the browser.</div>
-      </button>
-
-      <button id="sourceLookupBtn" class="source-btn" type="button">
-        <div class="source-btn-title">Enter paper details</div>
-        <div class="tiny muted">Provide title, year, and journal, and let the backend look up the paper.</div>
-      </button>
+    <h3>1) Choose input type</h3>
+    <div class="row">
+      <div style="flex:1; min-width:260px;">
+        <small>Input mode</small>
+        <select id="inputMode" style="padding:10px;">
+          <option value="pdf" selected>Upload PDF</option>
+          <option value="lookup">Enter paper details</option>
+        </select>
+      </div>
     </div>
 
-    <div id="pdfSection" style="margin-top:16px;">
+    <div id="pdfSection" style="margin-top:14px;">
       <div class="row">
         <div style="flex:2; min-width:280px;">
           <small>PDF file</small>
@@ -170,7 +124,7 @@
       </details>
     </div>
 
-    <div id="lookupSection" class="hidden" style="margin-top:16px;">
+    <div id="lookupSection" class="hidden" style="margin-top:14px;">
       <div class="row">
         <div style="flex:2; min-width:320px;">
           <small>Paper title</small>
@@ -182,11 +136,10 @@
         </div>
         <div style="flex:2; min-width:260px;">
           <small>Journal</small>
-          <input id="paperJournal" type="text" placeholder="Enter journal name" />
+          <input id="paperJournal" type="text" placeholder="Enter journal name (optional)" />
         </div>
       </div>
-
-      <p><small id="lookupStatus">No paper lookup run yet.</small></p>
+      <p><small id="lookupStatus">No lookup run yet.</small></p>
     </div>
   </div>
 
@@ -388,9 +341,9 @@
     let pdfText = "";
     let abstractText = "";
     let includeDebug = false;
+    let lastSourceTextForReview = "";
 
-    const sourcePdfBtn = document.getElementById("sourcePdfBtn");
-    const sourceLookupBtn = document.getElementById("sourceLookupBtn");
+    const inputModeEl = document.getElementById("inputMode");
     const pdfSectionEl = document.getElementById("pdfSection");
     const lookupSectionEl = document.getElementById("lookupSection");
 
@@ -453,19 +406,12 @@
       deepseek: "DeepSeek"
     };
 
-    let sourceMode = "pdf";
-
-    function setSourceMode(mode) {
-      sourceMode = mode;
-
+    function applyInputMode() {
+      const mode = inputModeEl.value;
       if (mode === "pdf") {
-        sourcePdfBtn.classList.add("active");
-        sourceLookupBtn.classList.remove("active");
         pdfSectionEl.classList.remove("hidden");
         lookupSectionEl.classList.add("hidden");
       } else {
-        sourcePdfBtn.classList.remove("active");
-        sourceLookupBtn.classList.add("active");
         pdfSectionEl.classList.add("hidden");
         lookupSectionEl.classList.remove("hidden");
       }
@@ -477,21 +423,21 @@
       if (mode === "one_shot") {
         schemaEl.value = BASIC_SCHEMA;
         includeDebug = false;
-        schemaHintEl.innerHTML = `Auto schema: <code class="inline">basic</code>. Debug is <strong>OFF</strong>.`;
+        schemaHintEl.innerHTML = `Auto schema: <code class="inline">basic</code>.`;
         modeInfoEl.innerHTML = `
           <div class="mode-title">One-shot baseline</div>
           <div class="tiny muted">
-            Original baseline behavior (single call, abstract-only, basic schema).
+            Original baseline behavior with the basic schema.
           </div>
         `;
       } else {
         schemaEl.value = CONTEXTUAL_SCHEMA;
         includeDebug = true;
-        schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code>. Debug is <strong>ON</strong>.`;
+        schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code>.`;
         modeInfoEl.innerHTML = `
           <div class="mode-title">Two-shot mode</div>
           <div class="tiny muted">
-            Extracts candidate claims, then verifies/repairs them. Richer contextual output.
+            Verification-enabled extraction with the contextual schema.
           </div>
         `;
       }
@@ -569,4 +515,242 @@
 
       let text = "";
       for (let i = 1; i <= pdf.numPages; i++) {
-        const
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map(it => it.str).join(" ");
+        text += `\n\n[Page ${i}]\n${pageText}`;
+      }
+      return text.trim();
+    }
+
+    function extractAbstractOnly(fullText) {
+      const t = fullText || "";
+      const lower = t.toLowerCase();
+
+      const absIdx = lower.search(/\babstract\b/);
+      if (absIdx < 0) return t.slice(0, 4500).trim();
+
+      const after = t.slice(absIdx);
+      const endCandidates = [
+        /\bkeywords\b/i,
+        /\bkey words\b/i,
+        /\bintroduction\b/i,
+        /\b1[\.\s]+introduction\b/i,
+        /\bbackground\b/i
+      ];
+
+      let end = -1;
+      for (const re of endCandidates) {
+        const m = after.search(re);
+        if (m > 20 && (end === -1 || m < end)) end = m;
+      }
+
+      return (end > 0 ? after.slice(0, end) : after.slice(0, 5000)).trim();
+    }
+
+    applyInputMode();
+    applyModeDefaults();
+    clearReviews();
+
+    inputModeEl.addEventListener("change", applyInputMode);
+    modeEl.addEventListener("change", applyModeDefaults);
+
+    document.getElementById("loadBtn").onclick = async () => {
+      try {
+        const f = document.getElementById("pdf").files[0];
+        if (!f) return alert("Choose a PDF first.");
+
+        statusEl.textContent = "Extracting text from PDF in the browser...";
+        pdfText = await pdfToText(f);
+        abstractText = extractAbstractOnly(pdfText);
+        lastSourceTextForReview = abstractText;
+        clearReviews();
+
+        previewEl.textContent =
+          pdfText.slice(0, 2000) + (pdfText.length > 2000 ? "\n\n...[truncated]" : "");
+
+        abstractPreviewEl.textContent =
+          abstractText || "(No abstract heading detected; fallback text used.)";
+
+        statusEl.innerHTML =
+          `<span class="ok">Loaded PDF text</span> (${pdfText.length.toLocaleString()} chars). <span class="ok">Abstract extracted</span> (${abstractText.length.toLocaleString()} chars).`;
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Failed to extract PDF text.";
+        alert("Failed to extract PDF text. Try a different PDF or smaller file.");
+      }
+    };
+
+    document.getElementById("runBtn").onclick = async () => {
+      try {
+        let schema;
+        try {
+          schema = JSON.parse(schemaEl.value);
+        } catch {
+          return alert("Schema is not valid JSON.");
+        }
+
+        const provider = providerEl.value;
+        const modelInput = document.getElementById("model").value.trim();
+        const mode = modeEl.value;
+        const inputMode = inputModeEl.value;
+
+        outEl.textContent = "Calling backend...";
+        clearReviews();
+
+        if (inputMode === "pdf") {
+          if (!pdfText) return alert("Load PDF text first.");
+          if (!abstractText) return alert("No abstract text available.");
+
+          const instruction = mode === "one_shot" ? ONE_SHOT_INSTRUCTION : TWO_SHOT_INSTRUCTION;
+          const prompt = `DOCUMENT TEXT:\n${abstractText}\n\nTASK:\n${instruction}`;
+
+          const r = await fetch(`${API_BASE}/extract_json`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              provider,
+              model: modelInput || undefined,
+              mode,
+              retrieval_mode: "abstract_only",
+              include_debug: includeDebug,
+              prompt,
+              schema
+            })
+          });
+
+          const data = await r.json();
+          outEl.textContent = JSON.stringify(data, null, 2);
+          lastSourceTextForReview = abstractText;
+          return;
+        }
+
+        const title = paperTitleEl.value.trim();
+        const year = paperYearEl.value.trim();
+        const journal = paperJournalEl.value.trim();
+
+        if (!title) return alert("Enter a paper title.");
+
+        lookupStatusEl.textContent = "Looking up paper metadata and abstract...";
+
+        const r = await fetch(`${API_BASE}/lookup_extract`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title,
+            year: year || undefined,
+            journal: journal || undefined,
+            provider,
+            model: modelInput || undefined,
+            mode,
+            include_debug: includeDebug,
+            schema
+          })
+        });
+
+        const data = await r.json();
+        outEl.textContent = JSON.stringify(data, null, 2);
+
+        if (r.ok && data.lookup) {
+          lookupStatusEl.innerHTML =
+            `<span class="ok">Matched:</span> ${data.lookup.matched_title || ""} (${data.lookup.matched_year || ""}) — ${data.lookup.matched_journal || ""}`;
+          lastSourceTextForReview = JSON.stringify(data.lookup);
+        } else {
+          lookupStatusEl.textContent = "Paper lookup failed.";
+          lastSourceTextForReview = "";
+        }
+      } catch (e) {
+        console.error(e);
+        outEl.textContent = JSON.stringify({ error: String(e?.message || e) }, null, 2);
+      }
+    };
+
+    document.getElementById("reviewBtn").onclick = async () => {
+      try {
+        if (!outEl.textContent || outEl.textContent.trim() === "{}") {
+          return alert("Run extraction first.");
+        }
+
+        let schema;
+        try {
+          schema = JSON.parse(schemaEl.value);
+        } catch {
+          return alert("Schema is not valid JSON.");
+        }
+
+        let extracted;
+        try {
+          extracted = JSON.parse(outEl.textContent);
+        } catch {
+          return alert("Current output is not valid JSON.");
+        }
+
+        const candidate = extracted.result ?? extracted;
+        const selectedProvider = providerEl.value;
+        const reviewers = getDynamicReviewers(selectedProvider);
+
+        if (!lastSourceTextForReview) {
+          return alert("No source text/lookup metadata available for review.");
+        }
+
+        for (let i = 0; i < 3; i++) {
+          const rp = reviewers[i];
+          reviewTitleEls[i].textContent = displayNames[rp] || rp;
+          reviewCorrectEls[i].textContent = "...";
+          reviewIncorrectEls[i].textContent = "...";
+          reviewMissingEls[i].textContent = "Reviewing...";
+          reviewNotesEls[i].textContent = "Reviewing...";
+          reviewRawEls[i].textContent = "";
+        }
+
+        const r = await fetch(`${API_BASE}/review_json`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_text: lastSourceTextForReview,
+            schema,
+            candidate_json: candidate,
+            reviewers
+          })
+        });
+
+        const data = await r.json();
+
+        if (!r.ok) {
+          const errObj = { ok: false, error: JSON.stringify(data, null, 2) };
+          for (let i = 0; i < 3; i++) renderReviewCard(i, errObj);
+          return;
+        }
+
+        const res = data.reviewers || {};
+        for (let i = 0; i < 3; i++) {
+          const rp = reviewers[i];
+          renderReviewCard(i, res[rp]);
+        }
+      } catch (e) {
+        const msgObj = { ok: false, error: String(e?.message || e) };
+        for (let i = 0; i < 3; i++) renderReviewCard(i, msgObj);
+      }
+    };
+
+    document.getElementById("downloadBtn").onclick = () => {
+      const text = outEl.textContent || "{}";
+      const blob = new Blob([text], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "extraction-result.json";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
+
+    document.getElementById("copyBtn").onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(outEl.textContent || "{}");
+        alert("JSON copied to clipboard.");
+      } catch {
+        alert("Could not copy. You can copy manually.");
+      }
+    };
+  </script>
+</body>
+</html>
