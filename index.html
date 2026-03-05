@@ -190,6 +190,8 @@
       <button id="downloadBtn" style="flex:1; min-width:220px;">Download JSON</button>
       <button id="copyBtn" style="flex:1; min-width:220px;">Copy JSON</button>
     </div>
+
+    <p class="tiny muted" id="timing"></p>
   </div>
 
   <div class="card">
@@ -285,14 +287,12 @@
   <script type="module">
     const API_BASE = "https://wajahathssn-github-io.vercel.app/api";
 
-    // Instructions (kept exactly for one_shot / two_shot)
     const ONE_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract.";
 
     const TWO_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.";
 
-    // Schemas
     const BASIC_SCHEMA = `{
   "type": "object",
   "properties": {
@@ -347,7 +347,6 @@
   "required": ["items"]
 }`;
 
-    // ZERO-SHOT schema: material + properties only (no evidence)
     const ZERO_SHOT_SCHEMA = `{
   "type": "object",
   "properties": {
@@ -380,6 +379,7 @@
     const abstractPreviewEl = document.getElementById("abstractPreview");
     const lookupStatusEl = document.getElementById("lookupStatus");
     const outEl = document.getElementById("out");
+    const timingEl = document.getElementById("timing");
 
     const paperTitleEl = document.getElementById("paperTitle");
     const paperYearEl = document.getElementById("paperYear");
@@ -429,16 +429,7 @@
       deepseek: "DeepSeek"
     };
 
-    function enforceLookupOnlyForZeroShot() {
-      if (modeEl.value === "zero_shot" && inputModeEl.value === "pdf") {
-        alert("Zero-shot is lookup-only. Switching input mode to 'Enter paper details'.");
-        inputModeEl.value = "lookup";
-      }
-      applyInputMode();
-    }
-
     function applyInputMode() {
-      // Hide all PDF UI if not in pdf mode
       if (inputModeEl.value === "pdf") {
         pdfSectionEl.classList.remove("hidden");
         lookupSectionEl.classList.add("hidden");
@@ -468,7 +459,7 @@
         schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code>.`;
         modeInfoEl.innerHTML = `
           <div class="mode-title">Two-shot mode</div>
-          <div class="tiny muted">Uses the richer contextual schema.</div>
+          <div class="tiny muted">Uses the richer contextual schema (qualifiers/conditions).</div>
         `;
         return;
       }
@@ -479,10 +470,16 @@
       schemaHintEl.innerHTML = `Auto schema: <code class="inline">zero-shot</code> (material + property only).`;
       modeInfoEl.innerHTML = `
         <div class="mode-title">Zero-shot (lookup only)</div>
-        <div class="tiny muted">
-          Returns only material + property (no evidence). Intended for paper lookup.
-        </div>
+        <div class="tiny muted">Material + property only, no evidence. Intended for paper lookup.</div>
       `;
+    }
+
+    function enforceLookupOnlyForZeroShot() {
+      if (modeEl.value === "zero_shot" && inputModeEl.value === "pdf") {
+        alert("Zero-shot is lookup-only. Switching input mode to 'Enter paper details'.");
+        inputModeEl.value = "lookup";
+      }
+      applyInputMode();
     }
 
     function clearReviews() {
@@ -517,14 +514,7 @@
     }
 
     function renderReviewCard(index, obj) {
-      if (!obj) {
-        reviewCorrectEls[index].textContent = "-";
-        reviewIncorrectEls[index].textContent = "-";
-        reviewMissingEls[index].textContent = "[]";
-        reviewNotesEls[index].textContent = "None";
-        reviewRawEls[index].textContent = "";
-        return;
-      }
+      if (!obj) return;
 
       if (!obj.ok) {
         reviewCorrectEls[index].textContent = "ERR";
@@ -567,7 +557,6 @@
     function extractAbstractOnly(fullText) {
       const t = fullText || "";
       const lower = t.toLowerCase();
-
       const absIdx = lower.search(/\babstract\b/);
       if (absIdx < 0) return t.slice(0, 4500).trim();
 
@@ -585,11 +574,10 @@
         const m = after.search(re);
         if (m > 20 && (end === -1 || m < end)) end = m;
       }
-
       return (end > 0 ? after.slice(0, end) : after.slice(0, 5000)).trim();
     }
 
-    // Init
+    // init
     applyModeDefaults();
     applyInputMode();
     clearReviews();
@@ -629,10 +617,17 @@
     };
 
     document.getElementById("runBtn").onclick = async () => {
+      let tick = null;
+      const t0 = performance.now();
+      timingEl.textContent = "Running... (0.0s)";
+      tick = setInterval(() => {
+        timingEl.textContent = `Running... (${((performance.now() - t0) / 1000).toFixed(1)}s)`;
+      }, 100);
+
       try {
         let schema;
         try { schema = JSON.parse(schemaEl.value); }
-        catch { return alert("Schema is not valid JSON."); }
+        catch { clearInterval(tick); return alert("Schema is not valid JSON."); }
 
         const provider = providerEl.value;
         const modelInput = document.getElementById("model").value.trim();
@@ -641,16 +636,15 @@
         outEl.textContent = "Calling backend...";
         clearReviews();
 
-        // ZERO-SHOT is lookup-only (enforced)
-        if (mode === "zero_shot") {
-          if (inputModeEl.value !== "lookup") {
-            return alert("Zero-shot is lookup-only. Switch to 'Enter paper details'.");
-          }
+        if (mode === "zero_shot" && inputModeEl.value !== "lookup") {
+          clearInterval(tick);
+          timingEl.textContent = "Zero-shot is lookup-only.";
+          return alert("Zero-shot is lookup-only. Switch to 'Enter paper details'.");
         }
 
         if (inputModeEl.value === "pdf") {
-          if (!pdfText) return alert("Load PDF text first.");
-          if (!abstractText) return alert("No abstract text available.");
+          if (!pdfText) { clearInterval(tick); return alert("Load PDF text first."); }
+          if (!abstractText) { clearInterval(tick); return alert("No abstract text available."); }
 
           const instruction = mode === "one_shot" ? ONE_SHOT_INSTRUCTION : TWO_SHOT_INSTRUCTION;
           const prompt = `DOCUMENT TEXT:\n${abstractText}\n\nTASK:\n${instruction}`;
@@ -672,14 +666,16 @@
           const data = await r.json();
           outEl.textContent = JSON.stringify(data, null, 2);
           lastSourceTextForReview = abstractText;
+
+          clearInterval(tick);
+          timingEl.textContent = `Done in ${((performance.now() - t0) / 1000).toFixed(2)}s`;
           return;
         }
 
-        // lookup mode
         const title = paperTitleEl.value.trim();
         const year = paperYearEl.value.trim();
         const journal = paperJournalEl.value.trim();
-        if (!title) return alert("Enter a paper title.");
+        if (!title) { clearInterval(tick); return alert("Enter a paper title."); }
 
         lookupStatusEl.textContent = "Looking up paper metadata and abstract...";
 
@@ -692,7 +688,7 @@
             journal: journal || undefined,
             provider,
             model: modelInput || undefined,
-            mode, // includes zero_shot
+            mode,
             include_debug: includeDebug,
             schema
           })
@@ -709,7 +705,12 @@
           lookupStatusEl.textContent = "Paper lookup failed.";
           lastSourceTextForReview = "";
         }
+
+        clearInterval(tick);
+        timingEl.textContent = `Done in ${((performance.now() - t0) / 1000).toFixed(2)}s`;
       } catch (e) {
+        if (tick) clearInterval(tick);
+        timingEl.textContent = "Failed.";
         console.error(e);
         outEl.textContent = JSON.stringify({ error: String(e?.message || e) }, null, 2);
       }
@@ -717,9 +718,7 @@
 
     document.getElementById("reviewBtn").onclick = async () => {
       try {
-        if (!outEl.textContent || outEl.textContent.trim() === "{}") {
-          return alert("Run extraction first.");
-        }
+        if (!outEl.textContent || outEl.textContent.trim() === "{}") return alert("Run extraction first.");
 
         let schema;
         try { schema = JSON.parse(schemaEl.value); }
@@ -737,9 +736,7 @@
             ? abstractText
             : (extracted.source_text || lastSourceTextForReview || "");
 
-        if (!reviewSourceText) {
-          return alert("No abstract/source text available for cross-model review.");
-        }
+        if (!reviewSourceText) return alert("No abstract/source text available for cross-model review.");
 
         for (let i = 0; i < 3; i++) {
           const rp = reviewers[i];
@@ -763,21 +760,14 @@
         });
 
         const data = await r.json();
-
-        if (!r.ok) {
-          const errObj = { ok: false, error: JSON.stringify(data, null, 2) };
-          for (let i = 0; i < 3; i++) renderReviewCard(i, errObj);
-          return;
-        }
-
         const res = data.reviewers || {};
         for (let i = 0; i < 3; i++) {
           const rp = reviewers[i];
-          renderReviewCard(i, res[rp]);
+          renderReviewCard(i, res[rp] || { ok: false, error: "No review returned" });
         }
       } catch (e) {
-        const errObj = { ok: false, error: String(e?.message || e) };
-        for (let i = 0; i < 3; i++) renderReviewCard(i, errObj);
+        console.error(e);
+        alert("Review failed.");
       }
     };
 
