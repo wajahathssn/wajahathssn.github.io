@@ -24,6 +24,9 @@ function safeJsonParse(text) {
   return { ok: false };
 }
 
+// -------------------------
+// Provider calls
+// -------------------------
 async function callOpenAI({ model, system, user }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("Missing OPENAI_API_KEY on server");
@@ -102,30 +105,48 @@ async function callAnthropic({ model, system, user }) {
   return data.content?.map((b) => b.text).join("") ?? "";
 }
 
+// Gemini with retry/backoff for 503/429
 async function callGemini({ model, system, user }) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Missing GEMINI_API_KEY on server");
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
 
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: `${system}\n\n${user}` }]
-        }
-      ],
-      generationConfig: { temperature: 0 }
-    })
-  });
+  const maxRetries = 4;
 
-  const text = await r.text();
-  if (!r.ok) throw new Error(`Gemini error: ${r.status} ${text}`);
-  const data = JSON.parse(text);
-  return data.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") ?? "";
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: `${system}\n\n${user}` }]
+          }
+        ],
+        generationConfig: { temperature: 0 }
+      })
+    });
+
+    const text = await r.text();
+
+    if (r.ok) {
+      const data = JSON.parse(text);
+      return data.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") ?? "";
+    }
+
+    // Retry for transient issues
+    if ((r.status === 503 || r.status === 429 || r.status >= 500) && attempt < maxRetries - 1) {
+      const delayMs = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s, 16s
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+
+    throw new Error(`Gemini error: ${r.status} ${text}`);
+  }
+
+  throw new Error("Gemini error: retries exhausted");
 }
 
 async function callProvider({ provider, model, system, user }) {
@@ -143,6 +164,9 @@ async function callProvider({ provider, model, system, user }) {
   }
 }
 
+// -------------------------
+// Defaults
+// -------------------------
 function defaultModelFor(provider) {
   return (
     provider === "openai" ? "gpt-4o" :
@@ -154,9 +178,23 @@ function defaultModelFor(provider) {
 }
 
 function verifierModelFor(provider, selectedModel) {
-  // Force stronger verifier for OpenAI in two-shot mode
   if (provider === "openai") return "gpt-4o";
   return selectedModel;
+}
+
+// -------------------------
+// System prompts
+// -------------------------
+function extractSystemPromptZeroShot() {
+  return [
+    "You are a strict scientific property extractor.",
+    "Return ONLY valid JSON. No markdown. No extra text.",
+    "The JSON MUST validate against the provided JSON Schema.",
+    "Extract ONLY material names and their properties.",
+    "Do NOT include evidence, citations, or quotes unless the schema explicitly asks.",
+    "Do not guess. Do not infer missing facts.",
+    "Prefer concise property phrases."
+  ].join(" ");
 }
 
 function extractSystemPromptOneShot() {
@@ -207,6 +245,9 @@ function verifySystemPromptTwoShot() {
   ].join(" ");
 }
 
+// -------------------------
+// Rule-plan schema for two-shot
+// -------------------------
 function getRulePlanSchema() {
   return {
     type: "object",
@@ -222,24 +263,39 @@ function getRulePlanSchema() {
           required: ["name", "role"]
         }
       },
-      claim_types: {
-        type: "array",
-        items: { type: "string" }
-      },
-      paper_specific_rules: {
-        type: "array",
-        items: { type: "string" }
-      },
-      common_failure_modes: {
-        type: "array",
-        items: { type: "string" }
-      },
-      qualifier_expectations: {
-        type: "array",
-        items: { type: "string" }
-      }
+      claim_types: { type: "array", items: { type: "string" } },
+      paper_specific_rules: { type: "array", items: { type: "string" } },
+      common_failure_modes: { type: "array", items: { type: "string" } },
+      qualifier_expectations: { type: "array", items: { type: "string" } }
     },
     required: ["paper_specific_rules"]
+  };
+}
+
+// -------------------------
+// Runners
+// -------------------------
+async function runZeroShot({ provider, model, prompt, schema, validate }) {
+  const system = extractSystemPromptZeroShot();
+  const user = JSON.stringify({ prompt, schema });
+
+  let lastRaw = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const raw = await callProvider({ provider, model, system, user });
+    lastRaw = raw;
+
+    const parsed = safeJsonParse(raw);
+    if (!parsed.ok) continue;
+
+    if (validate(parsed.value)) {
+      return { ok: true, result: parsed.value };
+    }
+  }
+
+  return {
+    ok: false,
+    error: "Model output did not validate against schema",
+    raw: lastRaw
   };
 }
 
@@ -300,8 +356,7 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
   }
 
   // PASS 2A: generate PAPER-SPECIFIC verification plan
-  const rulePlanSchema = getRulePlanSchema();
-  const rulePlanValidate = ajv.compile(rulePlanSchema);
+  const rulePlanValidate = ajv.compile(getRulePlanSchema());
 
   const rulesSystem = rulesSystemPromptTwoShot();
   const rulesUser = JSON.stringify({
@@ -310,9 +365,7 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
     task: "Create a paper-specific verification plan for auditing a scientific JSON extraction."
   });
 
-  let rulesRaw = "";
   let rulesPlan = null;
-
   for (let attempt = 1; attempt <= 2; attempt++) {
     const raw = await callProvider({
       provider,
@@ -320,7 +373,6 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
       system: rulesSystem,
       user: rulesUser
     });
-    rulesRaw = raw;
 
     const parsed = safeJsonParse(raw);
     if (!parsed.ok) continue;
@@ -396,10 +448,13 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
   return {
     ok: false,
     error: "Two-shot verification output did not validate against schema",
-    raw: pass2Raw || pass1Raw || rulesRaw
+    raw: pass2Raw || pass1Raw
   };
 }
 
+// -------------------------
+// Handler
+// -------------------------
 export default async function handler(req, res) {
   setCors(res);
 
@@ -410,9 +465,7 @@ export default async function handler(req, res) {
     const required = process.env.API_AUTH_KEY;
     if (required) {
       const got = req.headers["x-api-key"];
-      if (got !== required) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
+      if (got !== required) return res.status(401).json({ error: "Unauthorized" });
     }
 
     const {
@@ -440,10 +493,14 @@ export default async function handler(req, res) {
 
     const validate = ajv.compile(schema);
 
-    const runResult =
-      extractionMode === "two_shot"
-        ? await runTwoShot({ provider: p, model: m, prompt, schema, validate })
-        : await runOneShot({ provider: p, model: m, prompt, schema, validate });
+    let runResult;
+    if (extractionMode === "two_shot") {
+      runResult = await runTwoShot({ provider: p, model: m, prompt, schema, validate });
+    } else if (extractionMode === "zero_shot") {
+      runResult = await runZeroShot({ provider: p, model: m, prompt, schema, validate });
+    } else {
+      runResult = await runOneShot({ provider: p, model: m, prompt, schema, validate });
+    }
 
     if (!runResult.ok) {
       return res.status(422).json({
