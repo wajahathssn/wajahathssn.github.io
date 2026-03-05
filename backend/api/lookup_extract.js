@@ -139,7 +139,7 @@ async function searchCrossref({ title, year, journal }) {
   return candidates;
 }
 
-async function searchOpenAlex({ title, year, journal }) {
+async function searchOpenAlex({ title }) {
   const params = new URLSearchParams();
   params.set("search", title);
   params.set("per-page", "8");
@@ -165,20 +165,10 @@ async function searchOpenAlex({ title, year, journal }) {
       year: candidateYear,
       doi,
       abstract,
-      score: scoreCandidate({
-        queryTitle: title,
-        queryYear: year,
-        queryJournal: journal,
-        candidateTitle,
-        candidateYear,
-        candidateJournal,
-        hasAbstract: !!abstract,
-        hasDoi: !!doi
-      })
+      score: 0 // we compute score with scoreCandidate below in findBestPaper
     };
   });
 
-  candidates.sort((a, b) => b.score - a.score);
   return candidates;
 }
 
@@ -190,23 +180,36 @@ async function findBestPaper({ title, year, journal }) {
   } catch {}
 
   try {
-    candidates.push(...await searchOpenAlex({ title, year, journal }));
+    const oa = await searchOpenAlex({ title });
+    // score OA candidates with your scoring function too
+    for (const c of oa) {
+      c.score = scoreCandidate({
+        queryTitle: title,
+        queryYear: year,
+        queryJournal: journal,
+        candidateTitle: c.title,
+        candidateYear: c.year,
+        candidateJournal: c.journal,
+        hasAbstract: !!c.abstract,
+        hasDoi: !!c.doi
+      });
+    }
+    candidates.push(...oa);
   } catch {}
 
-  if (!candidates.length) {
-    throw new Error("No paper candidates found");
-  }
+  if (!candidates.length) throw new Error("No paper candidates found");
 
   candidates.sort((a, b) => b.score - a.score);
   const best = candidates[0];
 
-  if (!best || best.score < 20) {
-    throw new Error("No confident paper match found");
-  }
+  if (!best || best.score < 20) throw new Error("No confident paper match found");
 
   return best;
 }
 
+// -------------------------
+// Provider calls
+// -------------------------
 async function callOpenAI({ model, system, user }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("Missing OPENAI_API_KEY on server");
@@ -285,28 +288,43 @@ async function callAnthropic({ model, system, user }) {
   return data.content?.map((b) => b.text).join("") ?? "";
 }
 
+// Gemini retry/backoff
 async function callGemini({ model, system, user }) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Missing GEMINI_API_KEY on server");
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
 
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      contents: [{
-        role: "user",
-        parts: [{ text: `${system}\n\n${user}` }]
-      }],
-      generationConfig: { temperature: 0 }
-    })
-  });
+  const maxRetries = 4;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [{ text: `${system}\n\n${user}` }]
+        }],
+        generationConfig: { temperature: 0 }
+      })
+    });
 
-  const text = await r.text();
-  if (!r.ok) throw new Error(`Gemini error: ${r.status} ${text}`);
-  const data = JSON.parse(text);
-  return data.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") ?? "";
+    const text = await r.text();
+    if (r.ok) {
+      const data = JSON.parse(text);
+      return data.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") ?? "";
+    }
+
+    if ((r.status === 503 || r.status === 429 || r.status >= 500) && attempt < maxRetries - 1) {
+      const delayMs = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s, 16s
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+
+    throw new Error(`Gemini error: ${r.status} ${text}`);
+  }
+
+  throw new Error("Gemini error: retries exhausted");
 }
 
 async function callProvider({ provider, model, system, user }) {
@@ -332,6 +350,21 @@ function defaultModelFor(provider) {
 function verifierModelFor(provider, selectedModel) {
   if (provider === "openai") return "gpt-4o";
   return selectedModel;
+}
+
+// -------------------------
+// Prompts
+// -------------------------
+function extractSystemPromptZeroShot() {
+  return [
+    "You are a strict scientific property extractor.",
+    "Return ONLY valid JSON. No markdown. No extra text.",
+    "The JSON MUST validate against the provided JSON Schema.",
+    "Extract ONLY material names and their properties.",
+    "Do NOT include evidence, citations, or quotes unless the schema explicitly asks.",
+    "Do not guess. Do not infer missing facts.",
+    "Prefer concise property phrases."
+  ].join(" ");
 }
 
 function extractSystemPromptOneShot() {
@@ -406,6 +439,25 @@ function getRulePlanSchema() {
   };
 }
 
+// -------------------------
+// Runners
+// -------------------------
+async function runZeroShot({ provider, model, prompt, schema, validate }) {
+  const system = extractSystemPromptZeroShot();
+  const user = JSON.stringify({ prompt, schema });
+
+  let lastRaw = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const raw = await callProvider({ provider, model, system, user });
+    lastRaw = raw;
+    const parsed = safeJsonParse(raw);
+    if (!parsed.ok) continue;
+    if (validate(parsed.value)) return { ok: true, result: parsed.value };
+  }
+
+  return { ok: false, error: "Model output did not validate against schema", raw: lastRaw };
+}
+
 async function runOneShot({ provider, model, prompt, schema, validate }) {
   const system = extractSystemPromptOneShot();
   const user = JSON.stringify({ prompt, schema });
@@ -443,7 +495,6 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
   }
 
   const rulePlanValidate = ajv.compile(getRulePlanSchema());
-
   const rulesSystem = rulesSystemPromptTwoShot();
   const rulesUser = JSON.stringify({
     source_text: prompt,
@@ -451,18 +502,12 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
     task: "Create a paper-specific verification plan for auditing a scientific JSON extraction."
   });
 
-  let rulesRaw = "";
   let rulesPlan = null;
-
   for (let attempt = 1; attempt <= 2; attempt++) {
     const raw = await callProvider({ provider, model, system: rulesSystem, user: rulesUser });
-    rulesRaw = raw;
     const parsed = safeJsonParse(raw);
     if (!parsed.ok) continue;
-    if (rulePlanValidate(parsed.value)) {
-      rulesPlan = parsed.value;
-      break;
-    }
+    if (rulePlanValidate(parsed.value)) { rulesPlan = parsed.value; break; }
   }
 
   if (!rulesPlan) {
@@ -488,14 +533,8 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
   let pass2Raw = "";
 
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const raw = await callProvider({
-      provider,
-      model: pass2Model,
-      system: verifySystem,
-      user: verifyUser
-    });
+    const raw = await callProvider({ provider, model: pass2Model, system: verifySystem, user: verifyUser });
     pass2Raw = raw;
-
     const parsed = safeJsonParse(raw);
     if (!parsed.ok) continue;
     if (validate(parsed.value)) {
@@ -524,13 +563,12 @@ async function runTwoShot({ provider, model, prompt, schema, validate }) {
     };
   }
 
-  return {
-    ok: false,
-    error: "Two-shot verification output did not validate against schema",
-    raw: pass2Raw || pass1Raw || rulesRaw
-  };
+  return { ok: false, error: "Two-shot verification output did not validate against schema", raw: pass2Raw || pass1Raw };
 }
 
+// -------------------------
+// Handler
+// -------------------------
 export default async function handler(req, res) {
   setCors(res);
 
@@ -544,23 +582,10 @@ export default async function handler(req, res) {
       if (got !== required) return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const {
-      title,
-      year,
-      journal,
-      schema,
-      provider,
-      model,
-      mode,
-      include_debug
-    } = req.body || {};
+    const { title, year, journal, schema, provider, model, mode, include_debug } = req.body || {};
 
-    if (!title || typeof title !== "string") {
-      return res.status(400).json({ error: "Missing title string" });
-    }
-    if (!schema || typeof schema !== "object") {
-      return res.status(400).json({ error: "Missing schema object" });
-    }
+    if (!title || typeof title !== "string") return res.status(400).json({ error: "Missing title string" });
+    if (!schema || typeof schema !== "object") return res.status(400).json({ error: "Missing schema object" });
 
     const best = await findBestPaper({ title, year, journal });
 
@@ -585,16 +610,22 @@ export default async function handler(req, res) {
     const validate = ajv.compile(schema);
 
     const instruction =
-      extractionMode === "one_shot"
-        ? "Extract mentions of materials and the properties they have which are mentioned in the abstract."
-        : "Extract mentions of materials and the properties they have which are mentioned in the abstract. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.";
+      extractionMode === "zero_shot"
+        ? "Extract ONLY material names and their properties from the abstract. Do NOT include evidence."
+        : (extractionMode === "one_shot"
+            ? "Extract mentions of materials and the properties they have which are mentioned in the abstract."
+            : "Extract mentions of materials and the properties they have which are mentioned in the abstract. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.");
 
     const prompt = `DOCUMENT TEXT:\n${best.abstract}\n\nTASK:\n${instruction}`;
 
-    const runResult =
-      extractionMode === "two_shot"
-        ? await runTwoShot({ provider: p, model: m, prompt, schema, validate })
-        : await runOneShot({ provider: p, model: m, prompt, schema, validate });
+    let runResult;
+    if (extractionMode === "two_shot") {
+      runResult = await runTwoShot({ provider: p, model: m, prompt, schema, validate });
+    } else if (extractionMode === "zero_shot") {
+      runResult = await runZeroShot({ provider: p, model: m, prompt, schema, validate });
+    } else {
+      runResult = await runOneShot({ provider: p, model: m, prompt, schema, validate });
+    }
 
     if (!runResult.ok) {
       return res.status(422).json({
