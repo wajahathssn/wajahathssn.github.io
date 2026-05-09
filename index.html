@@ -21,71 +21,40 @@
     .err { color: #b42318; font-weight: 600; }
     .hidden { display: none !important; }
 
-    .mode-box {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
-      padding: 10px 12px;
-      margin-top: 10px;
-    }
+    .mode-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
     .mode-title { font-weight: 600; margin-bottom: 4px; }
-    code.inline {
-      background: #f1f5f9;
-      padding: 1px 6px;
-      border-radius: 6px;
-      font-size: 12px;
-    }
+    code.inline { background: #f1f5f9; padding: 1px 6px; border-radius: 6px; font-size: 12px; }
 
-    .review-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(260px, 1fr));
-      gap: 12px;
-    }
-    @media (max-width: 900px) {
-      .review-grid { grid-template-columns: 1fr; }
-    }
-
-    .review-card {
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      padding: 10px;
-      background: #fff;
-    }
-    .review-card h4 {
-      margin: 0 0 8px 0;
-      font-size: 14px;
-    }
-
-    .review-stats {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-
-    .stat-box {
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 8px;
-      background: #f8fafc;
-      text-align: center;
-    }
-
-    .stat-label {
-      font-size: 12px;
-      color: #666;
-      margin-bottom: 4px;
-    }
-
-    .stat-value {
-      font-size: 22px;
-      font-weight: 700;
-      line-height: 1.1;
-    }
-
+    .review-grid { display: grid; grid-template-columns: repeat(3, minmax(260px, 1fr)); gap: 12px; }
+    @media (max-width: 900px) { .review-grid { grid-template-columns: 1fr; } }
+    .review-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; background: #fff; }
+    .review-card h4 { margin: 0 0 8px 0; font-size: 14px; }
+    .review-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+    .stat-box { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; background: #f8fafc; text-align: center; }
+    .stat-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    .stat-value { font-size: 22px; font-weight: 700; line-height: 1.1; }
     .review-block { margin-top: 8px; }
     .notes-list { margin: 0; padding-left: 18px; }
     .notes-list li { margin: 2px 0; }
+
+    /* Q&A pipeline */
+    .qa-card { border: 1px solid #d1d5db; border-radius: 10px; padding: 12px; background: #fafbfc; margin-top: 10px; }
+    .qa-question { font-weight: 600; margin-bottom: 6px; }
+    .qa-tag { display:inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; margin-right: 6px; }
+    .qa-tag-openai { background: #e0f2fe; color: #075985; }
+    .qa-tag-anthropic { background: #fef3c7; color: #92400e; }
+    .qa-tag-gemini { background: #ede9fe; color: #5b21b6; }
+    .qa-tag-deepseek { background: #fce7f3; color: #9d174d; }
+    .qa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+    @media (max-width: 800px) { .qa-grid { grid-template-columns: 1fr; } }
+    .qa-pane { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; background: white; }
+    .qa-pane h5 { margin: 0 0 6px 0; font-size: 13px; }
+    .verdict { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; margin-left: 6px; }
+    .verdict-agree { background: #d1fae5; color: #065f46; }
+    .verdict-disagree { background: #fee2e2; color: #991b1b; }
+    .verdict-kb_silent { background: #f3f4f6; color: #374151; }
+    .counts-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .count-pill { background: #fff; border: 1px solid #d1d5db; border-radius: 999px; padding: 4px 12px; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -104,7 +73,6 @@
       </div>
     </div>
 
-    <!-- PDF UI -->
     <div id="pdfSection" style="margin-top:14px;">
       <div class="row">
         <div style="flex:2; min-width:280px;">
@@ -115,21 +83,13 @@
           <button id="loadBtn" style="width:100%;">Load PDF Text</button>
         </div>
       </div>
-
       <p><small id="status">No PDF loaded.</small></p>
-
-      <details>
-        <summary><small>Preview extracted text (first ~2000 chars)</small></summary>
-        <pre id="preview"></pre>
-      </details>
-
-      <details style="margin-top:8px;">
-        <summary><small>Preview detected abstract</small></summary>
-        <pre id="abstractPreview"></pre>
-      </details>
+      <details><summary><small>Preview extracted text (first ~2000 chars)</small></summary>
+        <pre id="preview"></pre></details>
+      <details style="margin-top:8px;"><summary><small>Preview detected abstract</small></summary>
+        <pre id="abstractPreview"></pre></details>
     </div>
 
-    <!-- Lookup UI -->
     <div id="lookupSection" class="hidden" style="margin-top:14px;">
       <div class="row">
         <div style="flex:2; min-width:320px;">
@@ -151,7 +111,6 @@
 
   <div class="card">
     <h3>2) Extraction setup</h3>
-
     <div class="row">
       <div style="flex:1; min-width:240px;">
         <small>Mode</small>
@@ -161,7 +120,6 @@
           <option value="zero_shot">Zero-shot (lookup only: material + property)</option>
         </select>
       </div>
-
       <div style="flex:1; min-width:240px;">
         <small>Provider</small>
         <select id="provider" style="padding:10px;">
@@ -171,7 +129,6 @@
           <option value="deepseek">DeepSeek</option>
         </select>
       </div>
-
       <div style="flex:2; min-width:280px;">
         <small>Model (optional)</small>
         <input id="model" placeholder="Leave blank to use backend default" style="padding:10px;" />
@@ -185,10 +142,11 @@
     <textarea id="schema"></textarea>
 
     <div class="row" style="margin-top:12px;">
-      <button id="runBtn" style="flex:1; min-width:220px;">Run Extraction</button>
-      <button id="reviewBtn" style="flex:1; min-width:220px;">Run Cross-Model Review</button>
-      <button id="downloadBtn" style="flex:1; min-width:220px;">Download JSON</button>
-      <button id="copyBtn" style="flex:1; min-width:220px;">Copy JSON</button>
+      <button id="runBtn" style="flex:1; min-width:200px;">Run Extraction</button>
+      <button id="reviewBtn" style="flex:1; min-width:200px;">Run Cross-Model Review</button>
+      <button id="qaBtn" style="flex:1; min-width:200px; background:#7c3aed; color:white;">Run Q&amp;A Pipeline</button>
+      <button id="downloadBtn" style="flex:1; min-width:200px;">Download JSON</button>
+      <button id="copyBtn" style="flex:1; min-width:200px;">Copy JSON</button>
     </div>
 
     <p class="tiny muted" id="timing"></p>
@@ -202,86 +160,80 @@
   <div class="card">
     <h3>Cross-Model Review</h3>
     <p class="tiny muted">Runs review against the current extraction JSON using the other 3 providers.</p>
-
     <div class="review-grid">
       <div class="review-card">
         <h4 id="review-title-1">Reviewer 1</h4>
         <div class="review-stats">
-          <div class="stat-box">
-            <div class="stat-label">Correct</div>
-            <div class="stat-value" id="review-1-correct">-</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-label">Incorrect</div>
-            <div class="stat-value" id="review-1-incorrect">-</div>
-          </div>
+          <div class="stat-box"><div class="stat-label">Correct</div><div class="stat-value" id="review-1-correct">-</div></div>
+          <div class="stat-box"><div class="stat-label">Incorrect</div><div class="stat-value" id="review-1-incorrect">-</div></div>
         </div>
-        <div class="review-block">
-          <div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div>
-          <pre id="review-1-missing">[]</pre>
-        </div>
-        <div class="review-block">
-          <div class="tiny muted" style="margin-bottom:6px;">Notes</div>
-          <div id="review-1-notes" class="tiny muted">None</div>
-        </div>
-        <details style="margin-top:8px;">
-          <summary><small>Raw / error output</small></summary>
-          <pre id="review-1-raw"></pre>
-        </details>
+        <div class="review-block"><div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div><pre id="review-1-missing">[]</pre></div>
+        <div class="review-block"><div class="tiny muted" style="margin-bottom:6px;">Notes</div><div id="review-1-notes" class="tiny muted">None</div></div>
+        <details style="margin-top:8px;"><summary><small>Raw / error output</small></summary><pre id="review-1-raw"></pre></details>
       </div>
 
       <div class="review-card">
         <h4 id="review-title-2">Reviewer 2</h4>
         <div class="review-stats">
-          <div class="stat-box">
-            <div class="stat-label">Correct</div>
-            <div class="stat-value" id="review-2-correct">-</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-label">Incorrect</div>
-            <div class="stat-value" id="review-2-incorrect">-</div>
-          </div>
+          <div class="stat-box"><div class="stat-label">Correct</div><div class="stat-value" id="review-2-correct">-</div></div>
+          <div class="stat-box"><div class="stat-label">Incorrect</div><div class="stat-value" id="review-2-incorrect">-</div></div>
         </div>
-        <div class="review-block">
-          <div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div>
-          <pre id="review-2-missing">[]</pre>
-        </div>
-        <div class="review-block">
-          <div class="tiny muted" style="margin-bottom:6px;">Notes</div>
-          <div id="review-2-notes" class="tiny muted">None</div>
-        </div>
-        <details style="margin-top:8px;">
-          <summary><small>Raw / error output</small></summary>
-          <pre id="review-2-raw"></pre>
-        </details>
+        <div class="review-block"><div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div><pre id="review-2-missing">[]</pre></div>
+        <div class="review-block"><div class="tiny muted" style="margin-bottom:6px;">Notes</div><div id="review-2-notes" class="tiny muted">None</div></div>
+        <details style="margin-top:8px;"><summary><small>Raw / error output</small></summary><pre id="review-2-raw"></pre></details>
       </div>
 
       <div class="review-card">
         <h4 id="review-title-3">Reviewer 3</h4>
         <div class="review-stats">
-          <div class="stat-box">
-            <div class="stat-label">Correct</div>
-            <div class="stat-value" id="review-3-correct">-</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-label">Incorrect</div>
-            <div class="stat-value" id="review-3-incorrect">-</div>
-          </div>
+          <div class="stat-box"><div class="stat-label">Correct</div><div class="stat-value" id="review-3-correct">-</div></div>
+          <div class="stat-box"><div class="stat-label">Incorrect</div><div class="stat-value" id="review-3-incorrect">-</div></div>
         </div>
-        <div class="review-block">
-          <div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div>
-          <pre id="review-3-missing">[]</pre>
-        </div>
-        <div class="review-block">
-          <div class="tiny muted" style="margin-bottom:6px;">Notes</div>
-          <div id="review-3-notes" class="tiny muted">None</div>
-        </div>
-        <details style="margin-top:8px;">
-          <summary><small>Raw / error output</small></summary>
-          <pre id="review-3-raw"></pre>
-        </details>
+        <div class="review-block"><div class="tiny muted" style="margin-bottom:6px;">Missing properties (JSON)</div><pre id="review-3-missing">[]</pre></div>
+        <div class="review-block"><div class="tiny muted" style="margin-bottom:6px;">Notes</div><div id="review-3-notes" class="tiny muted">None</div></div>
+        <details style="margin-top:8px;"><summary><small>Raw / error output</small></summary><pre id="review-3-raw"></pre></details>
       </div>
     </div>
+  </div>
+
+  <!-- ============= NEW: Q&A & LOGIC PIPELINE PANEL ============= -->
+  <div class="card">
+    <h3>Q&amp;A &amp; Logic Pipeline (closed-book LLM vs Prolog over the JSON KB)</h3>
+    <p class="tiny muted">
+      Tests how usable the extracted JSON KB is. Each provider proposes 2 questions about the paper
+      (run sequentially so later models avoid duplicating earlier ones), giving 8 questions in total.
+      For each question the pipeline produces:
+      <b>Path A</b> — a closed-book LLM answer that sees only the JSON KB and not the paper, and
+      <b>Path B</b> — a Prolog query rewritten from the question against the JSON-derived fact base.
+      An LLM judge then classifies each pair as <code class="inline">agree</code>,
+      <code class="inline">disagree</code>, or <code class="inline">kb_silent</code>.
+      Run extraction first; the current JSON output and the abstract are used as inputs.
+    </p>
+
+    <div class="row" style="margin-top:8px;">
+      <div style="flex:1; min-width:240px;">
+        <small>Path A answer provider</small>
+        <select id="qaAnswerProvider" style="padding:10px;">
+          <option value="openai" selected>OpenAI</option>
+          <option value="anthropic">Claude</option>
+          <option value="gemini">Gemini</option>
+          <option value="deepseek">DeepSeek</option>
+        </select>
+      </div>
+    </div>
+
+    <p id="qaStatus" class="tiny muted" style="margin-top:8px;">Not run yet.</p>
+    <div id="qaCounts" class="counts-row"></div>
+    <div id="qaResults"></div>
+
+    <details style="margin-top:10px;">
+      <summary><small>Generated Prolog facts</small></summary>
+      <pre id="qaProlog"></pre>
+    </details>
+    <details style="margin-top:6px;">
+      <summary><small>Raw pipeline JSON output</small></summary>
+      <pre id="qaRaw"></pre>
+    </details>
   </div>
 
   <script type="module">
@@ -289,7 +241,6 @@
 
     const ONE_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract.";
-
     const TWO_SHOT_INSTRUCTION =
       "Extract mentions of materials and the properties they have which are mentioned in the abstract. Preserve conditions/qualifiers (e.g., under what conditions, in what device/cell, and with what measured values) when present.";
 
@@ -441,37 +392,24 @@
 
     function applyModeDefaults() {
       const m = modeEl.value;
-
       if (m === "one_shot") {
         schemaEl.value = BASIC_SCHEMA;
         includeDebug = false;
         schemaHintEl.innerHTML = `Auto schema: <code class="inline">basic</code>.`;
-        modeInfoEl.innerHTML = `
-          <div class="mode-title">One-shot baseline</div>
-          <div class="tiny muted">Uses the original basic schema.</div>
-        `;
+        modeInfoEl.innerHTML = `<div class="mode-title">One-shot baseline</div><div class="tiny muted">Uses the original basic schema.</div>`;
         return;
       }
-
       if (m === "two_shot") {
         schemaEl.value = CONTEXTUAL_SCHEMA;
         includeDebug = true;
         schemaHintEl.innerHTML = `Auto schema: <code class="inline">contextual</code>.`;
-        modeInfoEl.innerHTML = `
-          <div class="mode-title">Two-shot mode</div>
-          <div class="tiny muted">Uses the richer contextual schema (qualifiers/conditions).</div>
-        `;
+        modeInfoEl.innerHTML = `<div class="mode-title">Two-shot mode</div><div class="tiny muted">Uses the richer contextual schema (qualifiers/conditions).</div>`;
         return;
       }
-
-      // zero_shot
       schemaEl.value = ZERO_SHOT_SCHEMA;
       includeDebug = false;
       schemaHintEl.innerHTML = `Auto schema: <code class="inline">zero-shot</code> (material + property only).`;
-      modeInfoEl.innerHTML = `
-        <div class="mode-title">Zero-shot (lookup only)</div>
-        <div class="tiny muted">Material + property only, no evidence. Intended for paper lookup.</div>
-      `;
+      modeInfoEl.innerHTML = `<div class="mode-title">Zero-shot (lookup only)</div><div class="tiny muted">Material + property only, no evidence. Intended for paper lookup.</div>`;
     }
 
     function enforceLookupOnlyForZeroShot() {
@@ -498,10 +436,7 @@
     }
 
     function renderNotes(el, notes) {
-      if (!Array.isArray(notes) || notes.length === 0) {
-        el.textContent = "None";
-        return;
-      }
+      if (!Array.isArray(notes) || notes.length === 0) { el.textContent = "None"; return; }
       const ul = document.createElement("ul");
       ul.className = "notes-list tiny";
       for (const note of notes) {
@@ -515,7 +450,6 @@
 
     function renderReviewCard(index, obj) {
       if (!obj) return;
-
       if (!obj.ok) {
         reviewCorrectEls[index].textContent = "ERR";
         reviewIncorrectEls[index].textContent = "ERR";
@@ -524,11 +458,9 @@
         reviewRawEls[index].textContent = JSON.stringify(obj, null, 2);
         return;
       }
-
       const r = obj.review || {};
       const missing = Array.isArray(r.missing_properties_json) ? r.missing_properties_json : [];
       const notes = Array.isArray(r.notes) ? r.notes : [];
-
       reviewCorrectEls[index].textContent = String(r.correct_count ?? 0);
       reviewIncorrectEls[index].textContent = String(r.incorrect_count ?? 0);
       reviewMissingEls[index].textContent = JSON.stringify(missing, null, 2);
@@ -543,7 +475,6 @@
         "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs";
 
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-
       let text = "";
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
@@ -559,16 +490,11 @@
       const lower = t.toLowerCase();
       const absIdx = lower.search(/\babstract\b/);
       if (absIdx < 0) return t.slice(0, 4500).trim();
-
       const after = t.slice(absIdx);
       const endCandidates = [
-        /\bkeywords\b/i,
-        /\bkey words\b/i,
-        /\bintroduction\b/i,
-        /\b1[\.\s]+introduction\b/i,
-        /\bbackground\b/i
+        /\bkeywords\b/i, /\bkey words\b/i, /\bintroduction\b/i,
+        /\b1[\.\s]+introduction\b/i, /\bbackground\b/i
       ];
-
       let end = -1;
       for (const re of endCandidates) {
         const m = after.search(re);
@@ -582,16 +508,8 @@
     applyInputMode();
     clearReviews();
 
-    inputModeEl.addEventListener("change", () => {
-      enforceLookupOnlyForZeroShot();
-      clearReviews();
-    });
-
-    modeEl.addEventListener("change", () => {
-      applyModeDefaults();
-      enforceLookupOnlyForZeroShot();
-      clearReviews();
-    });
+    inputModeEl.addEventListener("change", () => { enforceLookupOnlyForZeroShot(); clearReviews(); });
+    modeEl.addEventListener("change", () => { applyModeDefaults(); enforceLookupOnlyForZeroShot(); clearReviews(); });
 
     document.getElementById("loadBtn").onclick = async () => {
       try {
@@ -653,13 +571,9 @@
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              provider,
-              model: modelInput || undefined,
-              mode,
-              retrieval_mode: "abstract_only",
-              include_debug: includeDebug,
-              prompt,
-              schema
+              provider, model: modelInput || undefined,
+              mode, retrieval_mode: "abstract_only",
+              include_debug: includeDebug, prompt, schema
             })
           });
 
@@ -686,11 +600,8 @@
             title,
             year: year || undefined,
             journal: journal || undefined,
-            provider,
-            model: modelInput || undefined,
-            mode,
-            include_debug: includeDebug,
-            schema
+            provider, model: modelInput || undefined,
+            mode, include_debug: includeDebug, schema
           })
         });
 
@@ -721,12 +632,10 @@
         if (!outEl.textContent || outEl.textContent.trim() === "{}") return alert("Run extraction first.");
 
         let schema;
-        try { schema = JSON.parse(schemaEl.value); }
-        catch { return alert("Schema is not valid JSON."); }
+        try { schema = JSON.parse(schemaEl.value); } catch { return alert("Schema is not valid JSON."); }
 
         let extracted;
-        try { extracted = JSON.parse(outEl.textContent); }
-        catch { return alert("Current output is not valid JSON."); }
+        try { extracted = JSON.parse(outEl.textContent); } catch { return alert("Current output is not valid JSON."); }
 
         const candidate = extracted.result ?? extracted;
         const reviewers = getDynamicReviewers(providerEl.value);
@@ -752,10 +661,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            source_text: reviewSourceText,
-            schema,
-            candidate_json: candidate,
-            reviewers
+            source_text: reviewSourceText, schema, candidate_json: candidate, reviewers
           })
         });
 
@@ -768,6 +674,99 @@
       } catch (e) {
         console.error(e);
         alert("Review failed.");
+      }
+    };
+
+    // ============= NEW: Q&A pipeline =============
+    document.getElementById("qaBtn").onclick = async () => {
+      const $ = id => document.getElementById(id);
+      try {
+        if (!outEl.textContent || outEl.textContent.trim() === "{}") return alert("Run extraction first.");
+
+        let extracted;
+        try { extracted = JSON.parse(outEl.textContent); }
+        catch { return alert("Current output is not valid JSON."); }
+
+        const kb = extracted.result ?? extracted;
+        const paper_text = inputModeEl.value === "pdf"
+          ? abstractText
+          : (extracted.source_text || lastSourceTextForReview || "");
+        if (!paper_text) return alert("No paper text available for question generation.");
+
+        const answer_provider = $("qaAnswerProvider").value;
+
+        $("qaStatus").innerHTML = `<span class="ok">Running pipeline (this may take 45-90s)...</span>`;
+        $("qaResults").innerHTML = "";
+        $("qaCounts").innerHTML = "";
+        $("qaProlog").textContent = "";
+        $("qaRaw").textContent = "";
+
+        const r = await fetch(`${API_BASE}/compare_paths`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kb, paper_text, answer_provider })
+        });
+        const data = await r.json();
+        $("qaRaw").textContent = JSON.stringify(data, null, 2);
+
+        if (!data.ok) {
+          $("qaStatus").innerHTML = `<span class="err">Pipeline failed.</span> ${data.error || "Unknown error"}`;
+          return;
+        }
+
+        $("qaStatus").innerHTML =
+          `<span class="ok">Done.</span> ${data.n_questions} questions, answer provider = <b>${displayNames[answer_provider] || answer_provider}</b>.`;
+
+        const c = data.counts || {};
+        $("qaCounts").innerHTML = `
+          <div class="count-pill">Agree: <b>${c.agree || 0}</b></div>
+          <div class="count-pill">Disagree: <b>${c.disagree || 0}</b></div>
+          <div class="count-pill">KB-silent: <b>${c.kb_silent || 0}</b></div>
+        `;
+
+        $("qaProlog").textContent = data.prolog_facts || "(no prolog generated)";
+
+        const sourceProviders = (data.questions || []).map(q =>
+          (typeof q === "object" && q.source_provider) ? q.source_provider : "openai"
+        );
+
+        const html = (data.comparisons || []).map((row, i) => {
+          const sp = sourceProviders[i] || "openai";
+          const tagClass = "qa-tag-" + sp;
+          const verdictClass = "verdict-" + row.judgement;
+          const aText = row.kb_silent
+            ? `<i>information not in KB</i>`
+            : (row.llm_answer || "(empty)");
+          const bText = row.prolog_query
+            ? `<code>${row.prolog_query}</code>`
+            : `<i>(no query produced)</i>`;
+          return `
+            <div class="qa-card">
+              <div class="qa-question">
+                Q${i + 1}. ${row.question}
+                <span class="verdict ${verdictClass}">${row.judgement}</span>
+              </div>
+              <div class="tiny muted">
+                <span class="qa-tag ${tagClass}">from ${displayNames[sp] || sp}</span>
+              </div>
+              <div class="qa-grid">
+                <div class="qa-pane">
+                  <h5>Path A — closed-book LLM (KB only)</h5>
+                  <div class="tiny">${aText}</div>
+                  <div class="tiny muted" style="margin-top:4px;">confidence: ${row.llm_confidence || "n/a"}</div>
+                </div>
+                <div class="qa-pane">
+                  <h5>Path B — Prolog query over JSON-derived facts</h5>
+                  <div class="tiny">${bText}</div>
+                  ${row.reason ? `<div class="tiny muted" style="margin-top:6px;">judge: ${row.reason}</div>` : ""}
+                </div>
+              </div>
+            </div>`;
+        }).join("");
+        $("qaResults").innerHTML = html;
+      } catch (e) {
+        console.error(e);
+        $("qaStatus").innerHTML = `<span class="err">Pipeline error: ${e.message || e}</span>`;
       }
     };
 
