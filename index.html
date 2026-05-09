@@ -53,8 +53,10 @@
     .verdict-agree { background: #d1fae5; color: #065f46; }
     .verdict-disagree { background: #fee2e2; color: #991b1b; }
     .verdict-kb_silent { background: #f3f4f6; color: #374151; }
+    .verdict-error { background: #fef3c7; color: #92400e; }
     .counts-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
     .count-pill { background: #fff; border: 1px solid #d1d5db; border-radius: 999px; padding: 4px 12px; font-size: 13px; }
+    .binding-row { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 2px 0; }
   </style>
 </head>
 <body>
@@ -196,18 +198,16 @@
     </div>
   </div>
 
-  <!-- ============= NEW: Q&A & LOGIC PIPELINE PANEL ============= -->
+  <!-- ============= Q&A & LOGIC PIPELINE PANEL ============= -->
   <div class="card">
     <h3>Q&amp;A &amp; Logic Pipeline (closed-book LLM vs Prolog over the JSON KB)</h3>
     <p class="tiny muted">
-      Tests how usable the extracted JSON KB is. Each provider proposes 2 questions about the paper
-      (run sequentially so later models avoid duplicating earlier ones), giving 8 questions in total.
-      For each question the pipeline produces:
-      <b>Path A</b> — a closed-book LLM answer that sees only the JSON KB and not the paper, and
-      <b>Path B</b> — a Prolog query rewritten from the question against the JSON-derived fact base.
-      An LLM judge then classifies each pair as <code class="inline">agree</code>,
-      <code class="inline">disagree</code>, or <code class="inline">kb_silent</code>.
-      Run extraction first; the current JSON output and the abstract are used as inputs.
+      Each provider proposes 2 questions about the paper (sequentially, with dedup), giving 8 total.
+      For each question:
+      <b>Path A</b> — closed-book LLM with access only to the JSON KB.
+      <b>Path B</b> — natural-language question is rewritten to a Prolog query, which is then
+      <i>actually executed</i> by tau-prolog against the JSON-derived fact base. Real bindings are returned.
+      The two paths are compared deterministically.
     </p>
 
     <div class="row" style="margin-top:8px;">
@@ -379,6 +379,11 @@
       gemini: "Gemini",
       deepseek: "DeepSeek"
     };
+
+    function escHtml(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
 
     function applyInputMode() {
       if (inputModeEl.value === "pdf") {
@@ -677,7 +682,7 @@
       }
     };
 
-    // ============= NEW: Q&A pipeline =============
+    // ============= Q&A pipeline (real Prolog execution) =============
     document.getElementById("qaBtn").onclick = async () => {
       const $ = id => document.getElementById(id);
       try {
@@ -722,6 +727,7 @@
           <div class="count-pill">Agree: <b>${c.agree || 0}</b></div>
           <div class="count-pill">Disagree: <b>${c.disagree || 0}</b></div>
           <div class="count-pill">KB-silent: <b>${c.kb_silent || 0}</b></div>
+          <div class="count-pill">Errors: <b>${c.error || 0}</b></div>
         `;
 
         $("qaProlog").textContent = data.prolog_facts || "(no prolog generated)";
@@ -734,16 +740,34 @@
           const sp = sourceProviders[i] || "openai";
           const tagClass = "qa-tag-" + sp;
           const verdictClass = "verdict-" + row.judgement;
+
           const aText = row.kb_silent
             ? `<i>information not in KB</i>`
-            : (row.llm_answer || "(empty)");
-          const bText = row.prolog_query
-            ? `<code>${row.prolog_query}</code>`
-            : `<i>(no query produced)</i>`;
+            : escHtml(row.llm_answer || "(empty)");
+
+          // Path B: show the query AND the actual bindings returned by Prolog
+          const bindings = Array.isArray(row.prolog_bindings) ? row.prolog_bindings : [];
+          let bindingsBlock;
+          if (row.prolog_error) {
+            bindingsBlock = `<div class="tiny err" style="margin-top:6px;">Prolog error: ${escHtml(row.prolog_error)}</div>`;
+          } else if (bindings.length === 0) {
+            bindingsBlock = `<div class="tiny muted" style="margin-top:6px;"><i>no bindings (Prolog says no answer)</i></div>`;
+          } else {
+            const items = bindings.map(b => `<div class="binding-row">${escHtml(b)}</div>`).join("");
+            bindingsBlock = `
+              <div class="tiny" style="margin-top:6px;"><b>Prolog bindings (${bindings.length}):</b></div>
+              ${items}
+            `;
+          }
+
+          const queryBlock = row.prolog_query
+            ? `<div class="tiny" style="margin-bottom:4px;"><b>query:</b> <code>${escHtml(row.prolog_query)}</code></div>`
+            : `<div class="tiny muted" style="margin-bottom:4px;"><i>(no query produced)</i></div>`;
+
           return `
             <div class="qa-card">
               <div class="qa-question">
-                Q${i + 1}. ${row.question}
+                Q${i + 1}. ${escHtml(row.question)}
                 <span class="verdict ${verdictClass}">${row.judgement}</span>
               </div>
               <div class="tiny muted">
@@ -753,12 +777,13 @@
                 <div class="qa-pane">
                   <h5>Path A — closed-book LLM (KB only)</h5>
                   <div class="tiny">${aText}</div>
-                  <div class="tiny muted" style="margin-top:4px;">confidence: ${row.llm_confidence || "n/a"}</div>
+                  <div class="tiny muted" style="margin-top:4px;">confidence: ${escHtml(row.llm_confidence || "n/a")}</div>
                 </div>
                 <div class="qa-pane">
-                  <h5>Path B — Prolog query over JSON-derived facts</h5>
-                  <div class="tiny">${bText}</div>
-                  ${row.reason ? `<div class="tiny muted" style="margin-top:6px;">judge: ${row.reason}</div>` : ""}
+                  <h5>Path B — Prolog over JSON-derived facts</h5>
+                  ${queryBlock}
+                  ${bindingsBlock}
+                  ${row.reason ? `<div class="tiny muted" style="margin-top:6px;">verdict: ${escHtml(row.reason)}</div>` : ""}
                 </div>
               </div>
             </div>`;
