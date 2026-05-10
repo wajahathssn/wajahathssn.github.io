@@ -1,6 +1,6 @@
 # PDF → JSON Extractor
 
-✅ Live site: https://wajahathssn.github.io/
+Live site: https://wajahathssn.github.io/
 
 This repo hosts a simple web UI (GitHub Pages) for uploading a PDF and running extraction to JSON (via your backend API).
 
