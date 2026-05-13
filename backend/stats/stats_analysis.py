@@ -1,28 +1,4 @@
-"""
-stats_analysis.py
-=================
-Statistical analysis for Project 15: LLMs and Chemical Engineering Knowledge.
-Wajahat Hussain, Cambridge IIB Chemical Engineering, 2026.
 
-Runs every statistical test reported in the dissertation. Each section is
-labelled with its corresponding hypothesis (H1-H7) and the dissertation
-section number where the substantive interpretation is given.
-
-Usage
------
-    python stats_analysis.py                  # run all tests
-    python stats_analysis.py --test H3        # run a specific hypothesis
-    python stats_analysis.py --bootstrap-only # just the agreement-ratio CI
-
-Dependencies: numpy, pandas, scipy, openpyxl
-
-The script expects data files in a ./data subdirectory; adjust the paths
-in the CONFIG block below to match your repository structure. Each test
-function fails gracefully if its data file is missing, so partial runs
-are possible if only some datasets are available.
-
-Random seed is fixed at 42 for reproducibility of the bootstrap CI.
-"""
 
 import argparse
 import sys
